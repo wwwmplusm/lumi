@@ -1,0 +1,4 @@
+*.pdf
+.cache/
+__pycache__/
+.~lock.*

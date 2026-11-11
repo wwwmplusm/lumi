@@ -1,0 +1,52 @@
+adams1996research-W3150085592/: metadata.json pages.json paper.ocr.pdf paper.pdf paper.txt README.md 
+ahmed2020dedemocratization-W3095809712/: metadata.json pages.json paper.pdf paper.txt README.md 
+ahmed2023growing-W4322763951/: metadata.json pages.json paper.pdf paper.txt README.md 
+arrow1961capital-W2072312726/: metadata.json pages.json paper.pdf paper.txt README.md 
+baruffaldi2020identifying-W3022340842/: metadata.json pages.json paper.pdf paper.txt README.md 
+besiroglu2024compute-W4390722653/: metadata.json pages.json paper.pdf paper.txt README.md 
+bianchini2020deep-W3082359545/: metadata.json pages.json paper.pdf paper.txt README.md 
+cai2025export-W4416567722/: metadata.json README.md 
+callaway2020difference-W3113269512/: fulltext_read_keenable.md metadata.json pages.json paper.pdf paper.txt README.md 
+callaway2021difference-W3186938411/: fulltext_v6_read_keenable.md metadata.json pages.json paper.pdf paper.txt paper-v6-read.pdf README.md 
+chen2026china-W7203752698/: metadata.json README.md 
+chen2026growing-W7166139308/: metadata.json pages.json paper.pdf paper.txt README.md 
+cinus2025measuring-W4412475394/: metadata.json pages.json paper.pdf paper.refetch.pdf paper.txt README.md 
+collier2011understanding-W2159961463/: metadata.json paper.pdf paper.txt README.md 
+costa2024complexity-W4402847720/: metadata.json pages.json paper.pdf paper.txt README.md 
+cowan2000explicit-W2740036821/: metadata.json pages.json paper.pdf paper.txt README.md wp_merit_rm1999-027.pdf wp_merit_rm1999-027.txt 
+crespi2008empirical-W2051719183/: metadata.json pages.json paper.pdf paper.txt README.md 
+dunham2020identifying-W3005803439/: metadata.json pages.json paper.pdf paper.txt README.md 
+dunivin2026uses-W7202272092/: metadata.json pages.json paper.pdf paper.txt README.md 
+fairfield2017explicit-W2593991403/: metadata.json pages.json paper.pdf paper.txt README.md 
+fang2026patents-W7154419368/: metadata.json pages.json paper.pdf paper.txt README.md 
+fonseca2016coauthorship-W2344469150/: metadata.json pages.json paper.pdf paper.txt README.md search_notes.md 
+frank2019evolution-W2912698222/: metadata.json README.md 
+gallo2026polarization-W7155108427/: metadata.json pages.json paper.pdf paper.txt README.md 
+giczy2021identifying-W3213382970/: metadata.json README.md 
+griliches1979issues-W1572691573/: metadata.json pages.json paper.pdf paper.txt README.md 
+gupta2024whack-W4404649502/: metadata.json pages.json paper.pdf paper.txt README.md 
+he2025export-W4413158519/: metadata.json README.md 
+jin2026technological-W7164919522/: metadata.json notes-technologic-jin.md pages.json paper-highlighted.pdf paper.pdf paper.txt README.md 
+jones1995based-W2052139061/: metadata.json pages.json paper.ocr.pdf paper.pdf paper.txt README.md verified-excerpts.md 
+kelly2018measuring-W3125268793/: metadata.json pages.json paper.pdf paper.txt README.md 
+kim2024investigating-W4404721347/: metadata.json pages.json paper.pdf paper.txt README.md 
+kitajima2025altering-W4408099026/: metadata.json pages.json paper.pdf paper.txt README.md 
+klinger2018deep-W2887639919/: metadata.json pages.json paper.pdf paper.txt README.md 
+klinger2020narrowing-W3088964928/: metadata.json pages.json paper.pdf paper.refetch.pdf paper.txt README.md 
+lambert2026atom-W7152653240/: metadata.json pages.json paper.pdf paper.txt README.md 
+laufer2025anatomy-W4416540570/: metadata.json pages.json paper.pdf paper.txt README.md 
+liang2024complementary-W4391125363/: metadata.json pages.json paper.pdf paper.refetch.pdf paper.txt README.md 
+lin2025sanctions-W4407260651/: metadata.json README.md 
+liu2021tracking-W3125340956/: metadata.json pages.json paper.pdf paper.txt README.md 
+liu2025entity-W4408449451/: metadata.json README.md 
+mahoney2012logic-W2092386195/: metadata.json README.md 
+meyer1994natural-W3123108749/: metadata.json ocr_selected_pages.txt pages.json paper.ocr.pdf paper.pdf paper.txt README.md 
+pilz2023increased-W4389115923/: metadata.json pages.json paper.pdf paper.txt README.md 
+pu2026sanctions-W7203724392/: ai_review.md metadata.json notes_mark.md pages.json paper.pdf paper.txt README.md 
+raff2019step-W2970043916/: metadata.json pages.json paper.pdf paper.txt README.md 
+ricks2018process-W2815986250/: metadata.json pages.json paper.pdf paper.txt README.md 
+roach2012lens-W2889866538/: metadata.json pages.json paper.pdf paper.txt README.md 
+rose2025tracing-W7117958573/: metadata.json pages.json paper.pdf paper.txt README.md 
+roth2022trending-W4221167755/: fulltext_read_keenable.md metadata.json pages.json paper.pdf paper.txt README.md 
+whitfill2025compute-W4414457005/: metadata.json pages.json paper.pdf paper.txt README.md 
+yu2026digital-W7213518371/: metadata.json README.md 

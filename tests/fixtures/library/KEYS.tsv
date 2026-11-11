@@ -1,0 +1,53 @@
+key	openalex_id	folder	title
+griliches1979issues	W1572691573	griliches1979issues-W1572691573	Issues in Assessing the Contribution of Research and Development to Productivity Growth
+crespi2008empirical	W2051719183	crespi2008empirical-W2051719183	An empirical study of scientific production: A cross country analysis, 1981–2002
+jones1995based	W2052139061	jones1995based-W2052139061	R & D-Based Models of Economic Growth
+arrow1961capital	W2072312726	arrow1961capital-W2072312726	Capital-Labor Substitution and Economic Efficiency
+mahoney2012logic	W2092386195	mahoney2012logic-W2092386195	The Logic of Process Tracing Tests in the Social Sciences
+collier2011understanding	W2159961463	collier2011understanding-W2159961463	Understanding Process Tracing
+fonseca2016coauthorship	W2344469150	fonseca2016coauthorship-W2344469150	Co-authorship network analysis in health research: method and potential use
+fairfield2017explicit	W2593991403	fairfield2017explicit-W2593991403	Explicit Bayesian Analysis for Process Tracing: Guidelines, Opportunities, and Caveats
+cowan2000explicit	W2740036821	cowan2000explicit-W2740036821	The explicit economics of knowledge codification and tacitness
+ricks2018process	W2815986250	ricks2018process-W2815986250	Process-Tracing Research Designs: A Practical Guide
+klinger2018deep	W2887639919	klinger2018deep-W2887639919	Deep Learning, Deep Change? Mapping the Development of the Artificial Intelligence General Purpose Technology
+roach2012lens	W2889866538	roach2012lens-W2889866538	Lens or Prism? Patent Citations as a Measure of Knowledge Flows from Public Research
+frank2019evolution	W2912698222	frank2019evolution-W2912698222	The evolution of citation graphs in artificial intelligence research
+raff2019step	W2970043916	raff2019step-W2970043916	A Step Toward Quantifying Independently Reproducible Machine Learning Research
+dunham2020identifying	W3005803439	dunham2020identifying-W3005803439	Identifying the Development and Application of Artificial Intelligence in Scientific Text
+baruffaldi2020identifying	W3022340842	baruffaldi2020identifying-W3022340842	Identifying and measuring developments in artificial intelligence
+bianchini2020deep	W3082359545	bianchini2020deep-W3082359545	Deep Learning in Science
+klinger2020narrowing	W3088964928	klinger2020narrowing-W3088964928	A Narrowing of AI Research?
+ahmed2020dedemocratization	W3095809712	ahmed2020dedemocratization-W3095809712	The De-democratization of AI: Deep Learning and the Compute Divide in Artificial Intelligence Research
+callaway2020difference	W3113269512	callaway2020difference-W3113269512	Difference-in-Differences with multiple time periods
+meyer1994natural	W3123108749	meyer1994natural-W3123108749	Natural and Quasi- Experiments in Economics
+kelly2018measuring	W3125268793	kelly2018measuring-W3125268793	Measuring Technological Innovation over the Long Run
+liu2021tracking	W3125340956	liu2021tracking-W3125340956	Tracking developments in artificial intelligence research: constructing and applying a new search strategy
+adams1996research	W3150085592	adams1996research-W3150085592	Research Productivity in a System of Universities
+callaway2021difference	W3186938411	callaway2021difference-W3186938411	Difference-in-Differences with a Continuous Treatment
+giczy2021identifying	W3213382970	giczy2021identifying-W3213382970	Identifying artificial intelligence (AI) invention: a novel AI patent dataset
+roth2022trending	W4221167755	roth2022trending-W4221167755	What's Trending in Difference-in-Differences? A Synthesis of the Recent Econometrics Literature
+ahmed2023growing	W4322763951	ahmed2023growing-W4322763951	The growing influence of industry in AI research
+pilz2023increased	W4389115923	pilz2023increased-W4389115923	Increased Compute Efficiency and the Diffusion of AI Capabilities
+besiroglu2024compute	W4390722653	besiroglu2024compute-W4390722653	The Compute Divide in Machine Learning: A Threat to Academic Contribution and Scrutiny?
+liang2024complementary	W4391125363	liang2024complementary-W4391125363	The complementary contributions of academia and industry to AI research
+costa2024complexity	W4402847720	costa2024complexity-W4402847720	Complexity and phase transitions in citation networks: insights from artificial intelligence research
+gupta2024whack	W4404649502	gupta2024whack-W4404649502	Whack-a-Chip: The Futility of Hardware-Centric Export Controls
+kim2024investigating	W4404721347	kim2024investigating-W4404721347	Investigating the Effect of the U.S. Semiconductor Export Controls on China
+lin2025sanctions	W4407260651	lin2025sanctions-W4407260651	US sanctions and corporate innovation: Evidence from Chinese listed firms
+kitajima2025altering	W4408099026	kitajima2025altering-W4408099026	The altering landscape of US–China science collaboration: from convergence to divergence
+liu2025entity	W4408449451	liu2025entity-W4408449451	Does U.S. Entity List impel Chinese AI enterprises to exploratory innovation? An external knowledge acquisition perspective
+cinus2025measuring	W4412475394	cinus2025measuring-W4412475394	Measuring how computer science research translates into innovation and development
+he2025export	W4413158519	he2025export-W4413158519	Export controls and innovation transfer within Chinese business groups: Evidence from the U.S. entity list
+whitfill2025compute	W4414457005	whitfill2025compute-W4414457005	Will Compute Bottlenecks Prevent an Intelligence Explosion?
+laufer2025anatomy	W4416540570	laufer2025anatomy-W4416540570	Anatomy of a Machine Learning Ecosystem: 2 Million Models on Hugging Face
+cai2025export	W4416567722	cai2025export-W4416567722	Export restrictions and the rise of basic research: how chip controls influence Chinese firms’ research orientation
+rose2025tracing	W7117958573	rose2025tracing-W7117958573	Tracing the Flow of Knowledge From Science to Technology Using Deep Learning
+lambert2026atom	W7152653240	lambert2026atom-W7152653240	The ATOM Report: Measuring the Open Language Model Ecosystem
+fang2026patents	W7154419368	fang2026patents-W7154419368	AI Patents in the United States and China: Measurement, Organization, and Knowledge Flows
+gallo2026polarization	W7155108427	gallo2026polarization-W7155108427	Polarization and Integration in Global AI Research
+jin2026technological	W7164919522	jin2026technological-W7164919522	U.S. Technological Containment and the Rise of China's Open AI Ecosystem
+chen2026growing	W7166139308	chen2026growing-W7166139308	The Growing Self-Reliance of Chinese Innovation
+dunivin2026uses	W7202272092	dunivin2026uses-W7202272092	Who Uses Open-Weight Models? China and the Shifting Geography of AI in Science
+pu2026sanctions	W7203724392	pu2026sanctions-W7203724392	Science under sanctions: The impact of the entity list on Chinese academic research
+chen2026china	W7203752698	chen2026china-W7203752698	China's Diffusion‐Forward AI Strategy: The “ AI Race” in Political Economic Context
+yu2026digital	W7213518371	yu2026digital-W7213518371	Digital transformation and innovation resilience under geopolitical conflict: Evidence from U.S.-China technology sanctions

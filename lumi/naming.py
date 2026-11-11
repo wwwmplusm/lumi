@@ -100,6 +100,15 @@ def ascii_fold(text):
     return "".join(ch for ch in folded if not unicodedata.combining(ch)).encode("ascii", "ignore").decode()
 
 
+def _is_last_first(value):
+    """True when ``value`` is a ``Last, First`` string, as in OpenAlex ``raw_author_name``."""
+    text = str(value or "")
+    if "," not in text:
+        return False
+    last, first = text.split(",", 1)
+    return bool(last.strip()) and bool(first.strip())
+
+
 def last_name(display_name):
     """Lowercase last name of one person, ASCII-folded.
 
@@ -107,6 +116,9 @@ def last_name(display_name):
     A display name without a comma uses the last token, so "Di Tong" stays
     tong and is not swallowed as an Italian particle. None of the 52 keys
     needed a particle rule. Generational suffixes (Jr, III) are dropped.
+    A trailing single-letter token is an initial, not the surname, and is
+    dropped when another token remains ("Jared Kaplan A" → kaplan). A name
+    that is only an initial is left as-is.
     """
     name = " ".join(ascii_fold(display_name or "").replace(".", " ").split())
     if not name:
@@ -114,7 +126,13 @@ def last_name(display_name):
     if "," in name:
         name = name.split(",", 1)[0].strip()
     parts = name.split()
-    while parts and parts[-1].lower().rstrip(".") in _GENERATIONAL:
+    while parts:
+        token = parts[-1]
+        letters = re.sub(r"[^A-Za-z]", "", token)
+        generational = token.lower().rstrip(".") in _GENERATIONAL
+        initial = len(letters) == 1 and len(parts) > 1
+        if not generational and not initial:
+            break
         parts.pop()
     if not parts:
         return "anon"
@@ -218,7 +236,12 @@ def make_cite_key(author, year, title, *, taken=(), collision=None):
 
 
 def first_author_name(work):
-    """Display name of the first author from an OpenAlex-like work dict."""
+    """Name of the first author from an OpenAlex-like work dict.
+
+    A ``raw_author_name`` written ``Last, First`` wins over ``display_name``.
+    OpenAlex sometimes appends a stray initial to the display name
+    ("Jared Kaplan A") while the raw name stays "Kaplan, Jared".
+    """
     authorships = work.get("authorships") or []
     if authorships:
         first = authorships[0]
@@ -227,6 +250,11 @@ def first_author_name(work):
         author = first.get("author") or {}
         if isinstance(author, str):
             return author
+        if not isinstance(author, dict):
+            author = {}
+        for raw in (first.get("raw_author_name"), author.get("raw_author_name")):
+            if _is_last_first(raw):
+                return raw
         name = author.get("display_name") or first.get("raw_author_name") or author.get("raw_author_name") or ""
         if name:
             return name

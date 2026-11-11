@@ -15,6 +15,7 @@ from lumi.library import Library, check_status, index_text, keys_text
 from lumi.naming import (
     FALLBACK_SUFFIXES,
     cite_key_for_work,
+    first_author_name,
     last_name,
     make_cite_key,
     title_word,
@@ -149,6 +150,31 @@ def test_key_rules_author_year_and_hyphens():
     assert title_word("Does U.S. Entity List impel Chinese AI enterprises") == "entity"
     assert title_word("China's Diffusion‐Forward AI Strategy") == "china"
     assert make_cite_key("Ann Adams", 1996, "Research Productivity in a System of Universities") == "adams1996research"
+
+
+def test_kaplan_display_name_does_not_use_the_trailing_initial():
+    # OpenAlex W3001279689 (Kaplan et al. 2020). display_name has a stray
+    # trailing initial; raw_author_name is the inverted form.
+    work = {
+        "id": "https://openalex.org/W3001279689",
+        "display_name": "Scaling Laws for Neural Language Models",
+        "publication_year": 2020,
+        "authorships": [{
+            "raw_author_name": "Kaplan, Jared",
+            "author": {"display_name": "Jared Kaplan A"},
+        }],
+    }
+    assert last_name("Jared Kaplan A") == "kaplan"
+    assert last_name("Kaplan, Jared") == "kaplan"
+    assert first_author_name(work) == "Kaplan, Jared"
+    assert cite_key_for_work(work) == "kaplan2020scaling"
+    display_only = {
+        "id": "https://openalex.org/W3001279689",
+        "display_name": "Scaling Laws for Neural Language Models",
+        "publication_year": 2020,
+        "authorships": [{"author": {"display_name": "Jared Kaplan A"}}],
+    }
+    assert cite_key_for_work(display_only) == "kaplan2020scaling"
 
 
 def test_collision_styles_are_a_single_switch():

@@ -78,10 +78,23 @@ def short_id(work):
 
 # --- logging and candidates ----------------------------------------------------
 
+def library_ids(project):
+    """Folder names plus the OpenAlex id encoded in ``<key>-W…`` or bare ``W…`` folders."""
+    from lumi.naming import openalex_id_from_folder
+    folders = list(project.paper_ids())
+    found = set(folders)
+    for name in folders:
+        openalex = openalex_id_from_folder(name)
+        if openalex:
+            found.add(openalex)
+    return found
+
+
 def record_search(project, db, query, rows, question=None):
     """rows: [{id, doi, title, year}] (id may be a DOI or arXiv id for non-OpenAlex databases)."""
-    library = set(project.paper_ids())
-    library_dois = {d for d in (doi_of(project, w) for w in library) if d}
+    folders = list(project.paper_ids())
+    library = library_ids(project)
+    library_dois = {d for d in (doi_of(project, w) for w in folders) if d}
     candidates = project.candidates()
     known = {c["id"] for c in candidates} | {(c.get("doi") or "").lower() for c in candidates if c.get("doi")}
     new = 0

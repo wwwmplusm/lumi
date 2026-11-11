@@ -106,15 +106,18 @@ def label(meta):
 
 
 def resolve(project, ref):
-    """W-id, key (Gao2026) or 'Gao 2026' -> W-id."""
-    ref = ref.strip()
-    if re.fullmatch(r"W\d+", ref, re.I) and meta_path(project, ref.upper()).exists():
-        return ref.upper()
-    wanted = re.sub(r"[^a-z0-9]", "", ascii_fold(ref).lower())
-    for identifier, meta in all_meta(project).items():
-        if (meta.get("key") or "").lower() == wanted:
-            return identifier
-    raise ValueError(f"нет статьи «{ref}» в библиотеке")
+    """Folder name for a W-id, a ``<key>-W…`` folder, a cite key, or 'Gao 2026'.
+
+    Bare ``W…`` folders still resolve. A folder named ``pu2026sanctions-W7203724392``
+    also resolves from ``W7203724392`` or ``pu2026sanctions``.
+    """
+    from lumi.naming import resolve_ref
+    names = project.paper_ids()
+    keys = {identifier: (meta.get("key") or "") for identifier, meta in all_meta(project).items()}
+    found = resolve_ref(names, ref, keys)
+    if not found:
+        raise ValueError(f"нет статьи «{ref}» в библиотеке")
+    return found
 
 
 # --- printed page numbers -----------------------------------------------------------

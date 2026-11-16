@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -12,14 +11,12 @@ from engine.project import ENGINE, MARKER, Project, find_root
 from engine.text import snippet
 
 
-def install_files(root, name):
-    import shlex
-    values = {"{{PYTHON}}": shlex.quote(sys.executable), "{{NAME}}": name,
-              "{{ENGINE_REL}}": os.path.relpath(ENGINE, root)}
+def install_files(root, name, context=""):
+    values = {"{{NAME}}": name, "{{CONTEXT}}": context or "1–3 предложения: что исследуем и зачем."}
     files = [("templates/CONTEXT.md", "CONTEXT.md"),
              ("templates/questions.md", "research/questions.md"),
              ("templates/AGENTS.md", "AGENTS.md"),
-             ("templates/gitignore", ".gitignore"), ("templates/lumi", "lumi"),
+             ("templates/gitignore", ".gitignore"),
              ("skills/lumi-research/SKILL.md", ".agents/skills/lumi-research/SKILL.md")]
     for src, dst in files:
         target = root / dst
@@ -32,7 +29,6 @@ def install_files(root, name):
         target.write_text(text, encoding="utf-8")
     if not (root / "CLAUDE.md").exists():
         (root / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
-    (root / "lumi").chmod(0o755)
 
 
 def cmd_init(args):
@@ -44,9 +40,9 @@ def cmd_init(args):
     root.mkdir(parents=True, exist_ok=True)
     for sub in ("literature", "research/field"):
         (root / sub).mkdir(parents=True, exist_ok=True)
-    config = {"name": args.name or root.name, "context": args.context or ""}
+    config = {"name": args.name or root.name}
     (root / MARKER).write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    install_files(root, config["name"])
+    install_files(root, config["name"], args.context)
     print(f"проект создан: {root}\nКонтекст: CONTEXT.md; вопросы: research/questions.md")
 
 
@@ -56,11 +52,6 @@ def cmd_pages(project, args):
         meta = papers.set_pages_manual(project, identifier, args.first, args.at)
     else:
         meta = papers.load_meta(project, identifier)
-        if args.detect:
-            result = papers.parse(project, [identifier])
-            if result:
-                return result
-            meta = papers.load_meta(project, identifier)
     labels = meta.get("page_labels") or []
     print(f"{papers.label(meta)}: печатные страницы — {meta.get('page_source')}" + (f" ({meta.get('page_note')})" if meta.get("page_note") else ""))
     if labels:
@@ -69,8 +60,7 @@ def cmd_pages(project, args):
 
 def cmd_field(project, args):
     if args.action == "refs":
-        reports.fetch_refs(project, args.min)
-        reports.build_field(project)
+        return reports.fetch_refs(project, args.min)
     elif args.action == "candidates":
         for c in project.candidates():
             if c.get("decision") and not args.all:
@@ -79,16 +69,14 @@ def cmd_field(project, args):
     elif args.action == "decide":
         if not args.id or args.decision not in ("include", "exclude", "maybe"):
             raise ValueError("field decide ID include|exclude|maybe --why «…»")
-        rows = project.candidates()
-        hits = [r for r in rows if r["id"] == args.id or (r.get("doi") or "") == args.id.lower()]
-        if not hits:
-            raise ValueError(f"нет кандидата {args.id}")
-        for r in hits:
-            r.update(decision=args.decision, why=args.why or "", decided=__import__("datetime").date.today().isoformat())
-        project.save_candidates(rows)
+        def decide(rows):
+            hits = [r for r in rows if r["id"] == args.id or (r.get("doi") or "") == args.id.lower()]
+            if not hits:
+                raise ValueError(f"нет кандидата {args.id}")
+            for row in hits:
+                row.update(decision=args.decision, why=args.why or "", decided=__import__("datetime").date.today().isoformat())
+        project.update_candidates(decide)
         print(f"{args.id}: {args.decision}" + (" — добавить: `lumi add " + args.id + "`" if args.decision == "include" else ""))
-    else:
-        reports.build_field(project)
 
 def cmd_check(project, args):
     if args.text is not None:
@@ -126,12 +114,12 @@ def build_parser():
     p.add_argument("--context", help="краткий контекст исследования")
 
     sub.add_parser("status", help="библиотека, вопросы и история поиска")
-    p = sub.add_parser("field", help="FIELD.md; refs — часто цитируемые; candidates; decide")
-    p.add_argument("action", nargs="?", choices=["build", "refs", "candidates", "decide"], default="build")
+    p = sub.add_parser("field", help="refs — ссылки библиотеки; candidates; decide")
+    p.add_argument("action", nargs="?", choices=["refs", "candidates", "decide"], default="candidates")
     p.add_argument("id", nargs="?")
     p.add_argument("decision", nargs="?")
     p.add_argument("--why")
-    p.add_argument("--min", type=int, default=2)
+    p.add_argument("--min", type=int, default=1)
     p.add_argument("--all", action="store_true")
 
     p = sub.add_parser("search", help="поиск статей (логируется, новые → кандидаты)")
@@ -148,16 +136,17 @@ def build_parser():
     p.add_argument("--question")
     p = sub.add_parser("parse", help="текст по страницам и печатные номера")
     p.add_argument("refs", nargs="*")
+    p.add_argument("--library", help="папка библиотеки (по умолчанию библиотека проекта)")
     p = sub.add_parser("pages", help="печатные страницы статьи; --first N [--at PDF] задать вручную")
     p.add_argument("ref")
     p.add_argument("--first", help="печатный номер страницы PDF --at (по умолчанию 1)")
     p.add_argument("--at", type=int, default=1)
-    p.add_argument("--detect", action="store_true")
     p = sub.add_parser("lookup", help="полнотекстовый поиск по страницам")
     p.add_argument("query")
     p.add_argument("--limit", type=int, default=10)
     p.add_argument("--paper", action="append")
     p.add_argument("--raw", action="store_true", help="запрос в синтаксисе FTS5")
+    p.add_argument("--library", help="папка библиотеки (по умолчанию библиотека проекта)")
     p = sub.add_parser("show", help="текст страницы")
     p.add_argument("ref")
     p.add_argument("--page", help="печатная страница")
@@ -183,28 +172,36 @@ def run(args):
         return onboarding.doctor(args.online)
     if args.command == "init":
         return cmd_init(args)
-    project = Project(find_root(args.project))
     c = args.command
+    if c in ("parse", "lookup") and args.library is not None:
+        from .library_cli import _library
+        project = _library(args.library, args.project)
+    else:
+        project = Project(find_root(args.project))
     if c == "status":
         reports.status(project)
     elif c == "field":
-        cmd_field(project, args)
+        return cmd_field(project, args)
     elif c == "search":
         rows = sources.search(project, args.db, args.query, args.limit, args.question)
         sources.print_rows(rows)
         return sources.result_status(rows)
     elif c == "citations":
+        from .library import Library
+        library = Library(project.papers)
         try:
-            folder = papers.resolve(project, args.ref)
-            ref = papers.load_meta(project, folder)["work"]["id"]
-        except ValueError:
+            folder = library.find(args.ref)
+        except LookupError:
             ref = args.ref
+        else:
+            ref = library.read_meta(folder)["work"]["id"]
         return sources.citations(project, ref, args.limit, args.question)
     elif c == "add":
         identifier = papers.add(project, args.identifier, args.question)
-        return 0 if papers.load_meta(project, identifier)["fulltext"] == "yes" else 1
+        meta = papers.load_meta(project, identifier)
+        return 0 if papers.fulltext_status(project, identifier, meta) == "yes" else 1
     elif c == "parse":
-        return papers.parse(project, [papers.resolve(project, r) for r in args.refs] or None)
+        return papers.parse(project, args.refs or None)
     elif c == "pages":
         return cmd_pages(project, args)
     elif c == "lookup":
@@ -219,15 +216,14 @@ def run(args):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        if sys.stdin.isatty():
-            argv = ["setup"]
-        else:
-            build_parser().print_help()
-            return 0
+        build_parser().print_help()
+        return 0
     args = build_parser().parse_args(argv)
     try:
-        onboarding.load_credentials()
+        if args.command in ("search", "citations", "add", "setup", "doctor") or (
+                args.command == "field" and args.action == "refs"):
+            onboarding.load_credentials()
         return run(args) or 0
-    except (OSError, ValueError, KeyError, sqlite3.Error, *sources.NET_ERRORS) as exc:
+    except (OSError, ValueError, KeyError, LookupError, sqlite3.Error, *sources.NET_ERRORS) as exc:
         print(f"Ошибка: {onboarding.redact(str(exc))}", file=sys.stderr)
         return 2

@@ -1,4 +1,4 @@
 # Research questions
 
-Optional search tags: `- ID: question | keywords: comma-separated terms`.
+Write each question as `- ID: question`.
 The agent can draft questions from the project context for the user to refine.

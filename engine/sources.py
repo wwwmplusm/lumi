@@ -1,5 +1,6 @@
 """Search APIs. Every search is logged to field/search_log.jsonl; unseen works become candidates."""
 
+import datetime as dt
 import json
 import os
 import re
@@ -93,51 +94,60 @@ def short_id(work):
 
 # --- logging and candidates ----------------------------------------------------
 
-def library_ids(project):
-    """Folder names plus the OpenAlex id encoded in ``<key>-W…`` or bare ``W…`` folders."""
-    from lumi.naming import openalex_id_from_folder
-    folders = list(project.paper_ids())
-    found = set(folders)
-    for name in folders:
-        openalex = openalex_id_from_folder(name)
-        if openalex:
-            found.add(openalex)
-    for folder in folders:
-        work = json.loads((project.papers / folder / "metadata.json").read_text(encoding="utf-8")).get("work") or {}
+def library_snapshot(project):
+    """Read each metadata file once for discovery identity matching."""
+    from .papers import all_meta
+    return all_meta(project)
+
+
+def library_ids(project, metas=None):
+    """Folder names and provider identities from a single metadata snapshot."""
+    from lumi.naming import openalex_id_from_folder, openalex_id_of
+    metas = library_snapshot(project) if metas is None else metas
+    found = set(metas)
+    for folder, meta in metas.items():
+        identifier = openalex_id_of(meta) or openalex_id_of(meta.get("work") or {}) or openalex_id_from_folder(folder)
+        if identifier:
+            found.add(identifier)
+        work = meta.get("work") or {}
         if work.get("id"):
             found.add(provider_id(work["id"]) or short_id(work))
     return found
 
 
 def record_search(project, db, query, rows, question=None):
-    """rows: [{id, doi, title, year}] (id may be a DOI or arXiv id for non-OpenAlex databases)."""
-    folders = list(project.paper_ids())
-    library = library_ids(project)
-    library_dois = {d for d in (doi_of(project, w) for w in folders) if d}
-    candidates = project.candidates()
-    known = {provider_id(c["id"]) or c["id"] for c in candidates} | {(c.get("doi") or "").lower().replace("https://doi.org/", "") for c in candidates if c.get("doi")}
-    new = 0
-    for row in rows:
-        doi = (row.get("doi") or "").lower().replace("https://doi.org/", "")
-        row["status"] = "library" if (provider_id(row["id"]) or row["id"]) in library or (doi and doi in library_dois) else ("candidate" if (provider_id(row["id"]) or row["id"]) in known or (doi and doi in known) else "new")
-        if row["status"] == "new":
-            new += 1
-            candidates.append({"id": row["id"], "doi": doi or None, "title": row.get("title"), "year": row.get("year"), "question": question, "db": db, "source_query": query, "date": today(), "decision": None, **({"work": row["work"]} if row.get("work") else {})})
-            known.add(provider_id(row["id"]) or row["id"])
-            if doi:
-                known.add(doi)
-    project.save_candidates(candidates)
-    append_jsonl(project.field / "search_log.jsonl", {"date": today(), "db": db, "query": query, "question": question, "found": len(rows), "new": new,
+    """Keep candidate state unique; journal every discovery, including known hits.
+
+    The event envelope supplies query/provider/question/time for all result IDs.
+    Candidate records retain their original metadata and decisions.
+    """
+    metas = library_snapshot(project)
+    library = library_ids(project, metas)
+    library_dois = {(meta.get("work", {}).get("doi") or "").lower().replace("https://doi.org/", "")
+                    for meta in metas.values()} - {""}
+
+    def update(candidates):
+        known = {provider_id(c["id"]) or c["id"] for c in candidates} | {(c.get("doi") or "").lower().replace("https://doi.org/", "") for c in candidates if c.get("doi")}
+        new = 0
+        for row in rows:
+            doi = (row.get("doi") or "").lower().replace("https://doi.org/", "")
+            identity = provider_id(row["id"]) or row["id"]
+            row["status"] = "library" if identity in library or (doi and doi in library_dois) else ("candidate" if identity in known or (doi and doi in known) else "new")
+            if row["status"] == "new":
+                new += 1
+                candidates.append({"id": row["id"], "doi": doi or None, "title": row.get("title"), "year": row.get("year"), "question": question, "db": db, "source_query": query, "date": today(), "decision": None, **({"work": row["work"]} if row.get("work") else {})})
+                known.add(identity)
+                if doi:
+                    known.add(doi)
+        return new
+
+    new = project.update_candidates(update)
+    append_jsonl(project.field / "search_log.jsonl", {"date": today(), "time": dt.datetime.now(dt.timezone.utc).isoformat(),
+                  "db": db, "query": query, "question": question, "found": len(rows), "new": new,
+                  "results": [{"id": row["id"], "doi": row.get("doi"), "status": row["status"]} for row in rows],
                   "stop": getattr(rows, "stop", "complete"), "error": getattr(rows, "error", None),
                   "requested": getattr(rows, "requested", None), "requests": getattr(rows, "requests", None)})
     return rows
-
-
-def doi_of(project, identifier):
-    path = project.papers / identifier / "metadata.json"
-    if not path.exists():
-        return None
-    return (json.loads(path.read_text(encoding="utf-8"))["work"].get("doi") or "").lower().replace("https://doi.org/", "") or None
 
 
 MARK = {"library": "★ в библиотеке", "candidate": "· уже кандидат", "new": "+ новый кандидат"}

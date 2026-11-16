@@ -19,17 +19,8 @@ def meta_path(project, identifier):
 
 
 def load_meta(project, identifier):
-    path = meta_path(project, identifier)
-    if not path.exists():
-        return None
-    meta = json.loads(path.read_text(encoding="utf-8"))
-    from lumi.naming import parse_folder_name
-    parsed = parse_folder_name(identifier)
-    if parsed:
-        meta.setdefault("key", parsed.key)
-    meta["fulltext"] = fulltext_status(project, identifier, meta)
-    meta.setdefault("page_source", "none")
-    return meta
+    from lumi.library import Library
+    return Library(project.papers).read_meta(project.papers / identifier)
 
 
 def save_meta(project, identifier, meta):
@@ -103,31 +94,13 @@ def label(meta):
 
 
 def resolve(project, ref):
-    """Folder name for a W-id, a ``<key>-W…`` folder, a cite key, or 'Gao 2026'.
-
-    Bare ``W…`` folders still resolve. A folder named ``pu2026sanctions-W7203724392``
-    also resolves from ``W7203724392`` or ``pu2026sanctions``.
-    """
-    from lumi.naming import resolve_ref
-    names = project.paper_ids()
-    keys = {identifier: (meta.get("key") or "") for identifier, meta in all_meta(project).items()}
-    found = resolve_ref(names, ref, keys)
-    if not found:
-        from lumi.library import Library
-        try:
-            found = Library(project.papers).find(ref).name
-        except LookupError:
-            pass
-    if not found:
-        normalized = re.sub(r"\s+", "", ref).casefold()
-        matches = [name for name, meta in all_meta(project).items()
-                   if re.sub(r"\s+", "", cite_name(meta)).casefold() == normalized]
-        if len(matches) > 1:
-            raise ValueError(f"неоднозначная ссылка «{ref}»: {', '.join(matches)}; используйте ключ или DOI")
-        found = matches[0] if matches else None
-    if not found:
-        raise ValueError(f"нет статьи «{ref}» в библиотеке")
-    return found
+    """Resolve all library aliases through the common library resolver."""
+    from lumi.library import Library
+    library = project if isinstance(project, Library) else Library(project.papers)
+    try:
+        return library.find(ref).name
+    except LookupError as exc:
+        raise ValueError(f"нет статьи «{ref}» в библиотеке") from exc
 
 
 # --- printed page numbers -----------------------------------------------------------
@@ -254,8 +227,8 @@ def pdf_file(project, identifier):
 
 def selected_pdf(folder):
     """Respect the recorded text version, including already OCRed originals."""
-    path = folder / "metadata.json"
-    meta = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    from lumi.library import Library
+    meta = Library(folder.parent).read_meta(folder) or {}
     selected = meta.get("text_source_pdf")
     if selected:
         if selected not in ("paper.pdf", "paper.ocr.pdf", "paper.refetch.pdf") or not (folder / selected).is_file():
@@ -341,11 +314,10 @@ def download_pdf(url, destination):
 def add(project, raw, question=None):
     """Use the existing catalog and preserve hand-edited cards and text versions."""
     from lumi.library import Library
-    from . import index
     library = Library(project.papers)
     try:
-        identifier = resolve(project, raw)
-    except ValueError:
+        identifier = library.find(raw).name
+    except LookupError:
         candidate = next((row for row in project.candidates()
                           if row["id"] == raw or (row.get("doi") or "").lower() == raw.lower()
                           or (sources.provider_id(raw) and sources.provider_id(row["id"]) == sources.provider_id(raw))), None)
@@ -354,7 +326,7 @@ def add(project, raw, question=None):
         work = candidate.get("work") if candidate else None
         if not work:
             work = sources.fetch_work(raw)
-        identifier = library.save_work(work)
+        identifier = library.save_work(work, refresh_catalog=False)
     folder = project.papers / identifier
     meta = load_meta(project, identifier)
     work = meta["work"]
@@ -383,16 +355,16 @@ def add(project, raw, question=None):
     save_meta(project, identifier, meta)
     # Re-adding a paper must not replace verified/OCR text already in use.
     if not load_pages(project, identifier):
-        parsed = "; ".join(library.parse([identifier]))
+        parsed = "; ".join(library.parse([identifier], refresh_catalog=False))
     else:
         parsed = "сохранён существующий текст"
     mark_candidate(project, identifier, work, "include")
     library.write_catalog()
-    index.build(project)
     meta = load_meta(project, identifier)
     print(f"{label(meta)} · {meta.get('key')} · {identifier}")
-    print(f"  текст: {meta['fulltext']} · {parsed}")
-    if meta["fulltext"] not in ("yes", "partial"):
+    status = fulltext_status(project, identifier, meta)
+    print(f"  текст: {status} · {parsed}")
+    if status not in ("yes", "partial"):
         from .onboarding import redact
         for error in meta.get("pdf_errors") or []:
             print(f"  загрузка: {redact(error)}")
@@ -403,19 +375,19 @@ def add(project, raw, question=None):
 
 def mark_candidate(project, identifier, work, decision, why=""):
     doi = (work.get("doi") or "").lower().replace("https://doi.org/", "")
-    rows = project.candidates()
-    for row in rows:
-        native = sources.provider_id(work.get("id", ""))
-        if (row["id"] in (identifier, sources.short_id(work))
-                or (native and sources.provider_id(row["id"]) == native)
-                or (doi and (row.get("doi") or "").lower().replace("https://doi.org/", "") == doi)):
-            row.update(decision=decision, decided=today(), why=why or row.get("why", ""), library_id=identifier)
-    project.save_candidates(rows)
+    def update(rows):
+        for row in rows:
+            native = sources.provider_id(work.get("id", ""))
+            if (row["id"] in (identifier, sources.short_id(work))
+                    or (native and sources.provider_id(row["id"]) == native)
+                    or (doi and (row.get("doi") or "").lower().replace("https://doi.org/", "") == doi)):
+                row.update(decision=decision, decided=today(), why=why or row.get("why", ""), library_id=identifier)
+    project.update_candidates(update)
 
 
 def parse(project, ids=None):
     from lumi.library import Library
-    library = Library(project.papers)
+    library = project if isinstance(project, Library) else Library(project.papers)
     for message in library.parse(ids):
         print(message)
     return 1 if library.parse_errors else 0

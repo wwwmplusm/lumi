@@ -17,5 +17,5 @@ packages = ["engine", "lumi"]
 
 [tool.setuptools.data-files]
 "share/lumi" = ["lumi.py"]
-"share/lumi/templates" = ["templates/AGENTS.md", "templates/CONTEXT.md", "templates/questions.md", "templates/gitignore", "templates/lumi"]
+"share/lumi/templates" = ["templates/AGENTS.md", "templates/CONTEXT.md", "templates/questions.md", "templates/gitignore"]
 "share/lumi/skills/lumi-research" = ["skills/lumi-research/SKILL.md"]

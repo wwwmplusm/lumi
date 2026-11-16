@@ -1,3 +1,0 @@
-#!/bin/sh
-# Обёртка проекта над движком Lumi.
-exec {{PYTHON}} "$(dirname "$0")/{{ENGINE_REL}}/lumi.py" --project "$(dirname "$0")" "$@"

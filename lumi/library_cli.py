@@ -43,18 +43,8 @@ def add_parser(sub):
     save.add_argument("--pdf")
     save.add_argument("--library", help="library folder (default: detected project library)")
 
-    parse = actions.add_parser("parse", help="extract paper.txt and pages.json")
-    parse.add_argument("refs", nargs="*")
-    parse.add_argument("--library", help="library folder (default: detected project library)")
-
     index = actions.add_parser("index", help="rebuild the full-text index")
     index.add_argument("--library", help="library folder (default: detected project library)")
-
-    lookup = actions.add_parser("lookup", help="search parsed pages")
-    lookup.add_argument("query")
-    lookup.add_argument("--limit", type=int, default=10)
-    lookup.add_argument("--paper", action="append")
-    lookup.add_argument("--library", help="library folder (default: detected project library)")
 
     find = actions.add_parser("find", help="resolve a folder, OpenAlex id, cite key, or DOI")
     find.add_argument("ref")
@@ -90,16 +80,8 @@ def run(args):
             folder = root.save_work(work, pdf_path=args.pdf)
             print(folder)
             return 0
-        if args.action == "parse":
-            for line in root.parse(args.refs or None):
-                print(line)
-            return 1 if root.parse_errors else 0
         if args.action == "index":
             print(f"index: {root.rebuild_index()} pages")
-            return 0
-        if args.action == "lookup":
-            for paper, page, snippet in root.lookup(args.query, args.limit, args.paper):
-                print(f'{paper} p.{page} "{snippet}"')
             return 0
         if args.action == "find":
             print(root.find(args.ref))

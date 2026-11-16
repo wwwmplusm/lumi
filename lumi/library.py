@@ -31,6 +31,7 @@ from lumi.naming import (
     is_legacy_folder,
     is_scholar_key,
     openalex_id_from_folder,
+    openalex_id_from_text,
     openalex_id_of,
     parse_folder_name,
     resolve_ref,
@@ -38,11 +39,6 @@ from lumi.naming import (
     work_year,
     year_part,
 )
-
-# Proposal: when metadata later gains an OpenAlex id, ``normalize --apply`` may
-# rename ``<key>-doi_…`` / ``arxiv_`` / ``local_`` to ``<key>-W…``. ``save``
-# never renames. Set this to False to keep fallback folders where they are.
-UPGRADE_FALLBACK_ON_NORMALIZE = True
 
 CANONICAL_FILES = frozenset({
     "paper.pdf",
@@ -278,12 +274,22 @@ class Library:
         return True
 
     def read_meta(self, folder):
+        """Read and validate metadata, with shared defaults but no filesystem statuses."""
         path = Path(folder) / "metadata.json"
         if not path.is_file():
             return None
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ValueError(f"{path} is not a JSON object")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("expected a JSON object")
+            if "work" in data and not isinstance(data["work"], dict):
+                raise ValueError("work must be a JSON object")
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"{path}: cannot read metadata: {exc}") from exc
+        parsed = parse_folder_name(Path(folder).name)
+        if parsed:
+            data.setdefault("key", parsed.key)
+        data.setdefault("page_source", "none")
         return data
 
     def work_dirs(self):
@@ -298,16 +304,13 @@ class Library:
                 found.append(child)
         return sorted(found, key=lambda path: path.name)
 
-    def load_works(self):
+    def load_works(self, folders=None):
         works = []
-        for path in self.work_dirs():
+        for path in self.work_dirs() if folders is None else folders:
             meta = {}
             meta_path = path / "metadata.json"
             if meta_path.is_file():
-                try:
-                    meta = self.read_meta(path) or {}
-                except (OSError, json.JSONDecodeError, ValueError):
-                    meta = {}
+                meta = self.read_meta(path) or {}
             body = meta.get("work") if isinstance(meta.get("work"), dict) else {}
             parsed = parse_folder_name(path.name)
             key = str(meta.get("key") or (parsed.key if parsed else ""))
@@ -357,7 +360,7 @@ class Library:
 
     # --- save ------------------------------------------------------------------
 
-    def save_work(self, work, pdf_path=None, pdf_bytes=None):
+    def save_work(self, work, pdf_path=None, pdf_bytes=None, *, refresh_catalog=True):
         """Create ``<key>-<id>`` for a new work. Re-saving the same work does not rename or duplicate.
 
         An existing folder is left untouched, including ``README.md``, ``paper.pdf``,
@@ -369,7 +372,8 @@ class Library:
         self.root.mkdir(parents=True, exist_ok=True)
         existing = self.match_existing(work, pdf_sha)
         if existing is not None:
-            self.write_catalog()
+            if refresh_catalog:
+                self.write_catalog()
             return existing.name
         taken = self._taken_keys()
         key = cite_key_for_work(work, taken=taken)
@@ -393,7 +397,8 @@ class Library:
         }
         self.write_text(folder / "metadata.json", json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
         self._write_readme_if_absent(folder, work)
-        self.write_catalog()
+        if refresh_catalog:
+            self.write_catalog()
         return name
 
     def _write_readme_if_absent(self, folder, work):
@@ -429,10 +434,7 @@ class Library:
             parsed = parse_folder_name(path.name)
             meta = {}
             if (path / "metadata.json").is_file():
-                try:
-                    meta = self.read_meta(path) or {}
-                except (OSError, json.JSONDecodeError, ValueError):
-                    meta = {}
+                meta = self.read_meta(path) or {}
             body = meta.get("work") if isinstance(meta.get("work"), dict) else {}
             folder_oa = openalex_id_from_folder(path.name) or meta.get("openalex_id") or openalex_id_of(body) or ""
             if work.get("id") and body.get("id") == work["id"]:
@@ -465,8 +467,15 @@ class Library:
         return taken
 
     def find(self, ref):
-        """Folder path for a folder name, OpenAlex id, cite key, or DOI."""
+        """Folder path for a folder, source ID, cite key, DOI, or author/year alias."""
         works = self.load_works()
+        oa = openalex_id_from_text(ref)
+        if oa:
+            matches = [work.path for work in works if work.openalex_id == oa]
+            if len(matches) > 1:
+                raise ValueError(f"ambiguous OpenAlex id {oa}: {', '.join(path.name for path in matches)}")
+            if matches:
+                return matches[0]
         hit = resolve_ref([work.folder for work in works], ref, {work.folder: work.key for work in works})
         if hit:
             return self.root / hit
@@ -486,11 +495,23 @@ class Library:
                 return hits[0].path
             if len(hits) > 1:
                 raise ValueError(f"ambiguous DOI {wanted}: {', '.join(work.folder for work in hits)}")
+        from engine.papers import cite_name
+        normalized = re.sub(r"\s+", "", str(ref)).casefold()
+        matches = []
+        for work in works:
+            meta = self.read_meta(work.path) or {}
+            meta.setdefault("key", work.key)
+            if isinstance(meta.get("work"), dict) and re.sub(r"\s+", "", cite_name(meta)).casefold() == normalized:
+                matches.append(work.path)
+        if len(matches) > 1:
+            raise ValueError(f"неоднозначная ссылка «{ref}»: {', '.join(path.name for path in matches)}; используйте ключ или DOI")
+        if matches:
+            return matches[0]
         raise LookupError(f"no work {ref!r}")
 
     # --- parse and index -------------------------------------------------------
 
-    def parse(self, refs=None):
+    def parse(self, refs=None, *, refresh_catalog=True):
         """Extract the selected PDF version without touching owner notes."""
         from engine.papers import selected_pdf, detect_pages
         if refs:
@@ -543,18 +564,19 @@ class Library:
                         empty_pdf_pages=[i for i, page in enumerate(pages, 1) if not page.strip()])
             self.write_text(folder / "metadata.json", json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
             messages.append(f"{folder.name}: {len(pages)} pages")
-        if messages:
+        if messages and refresh_catalog:
             self.write_catalog()
         return messages
 
     def rebuild_index(self):
+        works = self.load_works()
         signature = page_fingerprint(self.root)
         database = self.root / ".lumi" / "index.sqlite"
         if database.exists():
             database.unlink()
         connection = self._connect()
         count = 0
-        for work in self.load_works():
+        for work in works:
             pages = self.load_pages(work.path)
             if not pages:
                 continue
@@ -635,7 +657,7 @@ class Library:
                 continue
             findings.extend(self._check_folder(child, parsed, legacy))
             try:
-                works.extend(work for work in self.load_works() if work.folder == child.name)
+                works.extend(self.load_works([child]))
             except (OSError, json.JSONDecodeError, ValueError) as exc:
                 findings.append(Finding("error", "metadata", f"{child.name}/metadata.json", str(exc)))
         findings.extend(self._check_keys(works))
@@ -670,11 +692,6 @@ class Library:
             meta_oa = str(meta.get("openalex_id") or openalex_id_of(body) or "")
             if parsed.kind == "openalex" and meta_oa and meta_oa != parsed.ident:
                 findings.append(Finding("error", "mismatch", path.name, f"folder OpenAlex {parsed.ident} != metadata {meta_oa}"))
-            if parsed.kind != "openalex" and meta_oa:
-                findings.append(Finding(
-                    "warning", "openalex-not-in-folder", path.name,
-                    f"metadata OpenAlex {meta_oa} is not in the folder name (proposal: normalize can rename)",
-                ))
         status = folder_status(path)
         if status == "metadata only":
             findings.append(Finding("info", "metadata-only", path.name, "no paper.pdf or paper.txt"))
@@ -813,13 +830,9 @@ class Library:
         planned = []
         reserved = {path.name for path in self.work_dirs()}
         for path in ordered:
-            parsed = parse_folder_name(path.name)
             meta = {}
             if (path / "metadata.json").is_file():
-                try:
-                    meta = self.read_meta(path) or {}
-                except (OSError, json.JSONDecodeError, ValueError):
-                    meta = {}
+                meta = self.read_meta(path) or {}
             target = ""
             message = ""
             if is_legacy_folder(path.name):
@@ -828,12 +841,6 @@ class Library:
                 if not target:
                     actions.append(Action("skip", path.name, "", message))
                     continue
-            elif parsed and parsed.kind != "openalex" and UPGRADE_FALLBACK_ON_NORMALIZE:
-                body = meta.get("work") if isinstance(meta.get("work"), dict) else {}
-                oa = str(meta.get("openalex_id") or openalex_id_of(body) or "")
-                if oa:
-                    target = f"{parsed.key}-{oa}"
-                    message = "proposal: fallback folder now has an OpenAlex id"
             if not target or target == path.name:
                 continue
             parsed_target = parse_folder_name(target)

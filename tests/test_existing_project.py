@@ -126,7 +126,7 @@ def test_lookup_refreshes_after_external_library_change(existing):
     assert (project.research/'knowledge'/'claims.jsonl').read_text() == '{"id":"old-schema","unchanged":true}\n'
 
 
-def test_both_parsers_use_recorded_ocr_and_preserve_manual_pages(existing, monkeypatch):
+def test_parse_library_path_uses_recorded_ocr_and_preserves_manual_pages(existing, monkeypatch):
     project, folder, _ = existing
     meta = json.loads((folder/'metadata.json').read_text())
     meta.update(page_labels=['91'], page_source='manual')
@@ -140,24 +140,22 @@ def test_both_parsers_use_recorded_ocr_and_preserve_manual_pages(existing, monke
     assert calls == ['paper.ocr.pdf']
     assert papers.load_meta(project,folder.name)['page_labels'] == ['91']
     monkeypatch.setattr('lumi.library.extract_pdf_text', lambda pdf: (calls.append(pdf.name) or ['Library OCR text'], 'Library OCR text'))
-    assert main(['library','parse','W123']) == 0
+    assert main(['parse', 'W123', '--library', str(project.papers)]) == 0
     assert calls[-1] == 'paper.ocr.pdf'
     before=(folder/'pages.json').read_bytes()
     (folder/'paper.ocr.pdf').unlink()
-    assert main(['library','parse','W123']) == 1
+    assert main(['parse', 'W123', '--library', str(project.papers)]) == 1
     assert (folder/'pages.json').read_bytes() == before
     assert main(['parse','W123']) == 1
 
 
-def test_field_links_and_reference_filter_use_folder_ids(existing, monkeypatch):
+def test_reference_filter_uses_folder_ids(existing, monkeypatch):
     project, folder, work = existing
     seen=[]
     monkeypatch.setattr(sources,'fetch_works',lambda ids: seen.extend(ids) or [])
     reports.fetch_refs(project,min_count=1)
     assert seen == ['W999']
-    reports.build_field(project)
-    text=(project.field/'FIELD.md').read_text()
-    assert f'../../literature/{folder.name}/README.md' in text
+    assert not (project.field/'FIELD.md').exists()
     assert not (project.root/'FIELD.md').exists()
 
 
@@ -174,7 +172,7 @@ def test_new_project_uses_current_layout_and_skill(tmp_path):
     assert (root / 'literature').is_dir()
     assert (root / 'research' / 'questions.md').is_file()
     assert (root / '.agents' / 'skills' / 'lumi-research' / 'SKILL.md').is_file()
-    assert json.loads((root / 'lumi.json').read_text()) == {'name': 'Example', 'context': ''}
+    assert json.loads((root / 'lumi.json').read_text()) == {'name': 'Example'}
     assert not (root / 'sources').exists()
     assert not (root / 'knowledge').exists()
     before = snapshot(root)
@@ -187,7 +185,7 @@ def test_shared_index_and_preserved_legacy_records(existing):
     project, folder, _ = existing
     before = snapshot(project.research)
     assert main(['lookup', 'widgets']) == 0
-    assert main(['library', 'lookup', 'widgets']) == 0
+    assert main(['lookup', 'widgets', '--library', str(project.papers)]) == 0
     assert list(project.papers.rglob('*.sqlite')) == [project.papers / '.lumi' / 'index.sqlite']
     with sqlite3.connect(project.papers / '.lumi' / 'index.sqlite') as db:
         assert db.execute("SELECT count(*) FROM sqlite_master WHERE name='claims'").fetchone()[0] == 0
@@ -205,7 +203,7 @@ def test_parse_failure_preserves_text_and_manual_labels(existing, monkeypatch):
     assert main(['parse', 'W123']) == 1
     assert snapshot(folder) == before
     monkeypatch.setattr('lumi.library.extract_pdf_text', lambda pdf: ([''], ''))
-    assert main(['library', 'parse', 'W123']) == 1
+    assert main(['parse', 'W123', '--library', str(project.papers)]) == 1
     assert snapshot(folder) == before
 
 

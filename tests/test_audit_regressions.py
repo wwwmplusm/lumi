@@ -28,7 +28,7 @@ def save(project, identifier='W123'):
     return project.papers / name
 
 
-@pytest.mark.parametrize('command', [['parse', 'W123'], ['library', 'parse', 'W123'], ['add', 'W123']])
+@pytest.mark.parametrize('command', [['parse', 'W123'], ['add', 'W123']])
 def test_partial_extraction_is_not_success(clean_project, monkeypatch, command, capsys):
     folder = save(clean_project)
     (folder / 'paper.pdf').write_bytes(b'fixture')
@@ -43,10 +43,10 @@ def test_partial_extraction_is_not_success(clean_project, monkeypatch, command, 
     assert folder_status(folder) == 'partial text'
     assert json.loads((folder / 'pages.json').read_text())['pages'] == ['Title', '', '']
     assert 'partial text' in capsys.readouterr().out
-    reports.build_field(clean_project)
-    field = (clean_project.field / 'FIELD.md').read_text()
-    assert 'полный текст 0 · неполный текст 1' in field
-    assert 'нет текста 0' in field
+    reports.status(clean_project)
+    status = capsys.readouterr().out
+    assert 'полный текст 0' in status
+    assert 'Неполный текст: 1' in status
 
 
 def test_partial_reparse_preserves_verified_pages(clean_project, monkeypatch):
@@ -105,7 +105,7 @@ def test_multilingual_lookup(clean_project, query, page):
     rows = library.lookup(query)
     assert [row[:2] for row in rows] == [(folder.name, page)]
     assert main(['lookup', query]) == 0
-    assert main(['library', 'lookup', query]) == 0
+    assert main(['lookup', query, '--library', str(clean_project.papers)]) == 0
 
 
 def test_mixed_script_lookup_deduplicates_filters_and_refreshes(clean_project):
@@ -124,10 +124,10 @@ def test_mixed_script_lookup_deduplicates_filters_and_refreshes(clean_project):
     assert library.lookup('替换', papers=['W456'])
 
 
-def test_lookup_limit_is_consistent_between_commands(clean_project, capsys):
+def test_lookup_limit_is_consistent_between_library_paths(clean_project, capsys):
     folder = save(clean_project)
     (folder / 'pages.json').write_text(json.dumps({'pages': ['widgets'] * 125}))
-    for command in [['lookup', 'widgets', '--limit', '125'], ['library', 'lookup', 'widgets', '--limit', '125']]:
+    for command in [['lookup', 'widgets', '--limit', '125'], ['lookup', 'widgets', '--limit', '125', '--library', str(clean_project.papers)]]:
         assert main(command) == 0
         assert len(capsys.readouterr().out.splitlines()) == 125
 
@@ -186,7 +186,7 @@ def test_unpaywall_failure_is_not_no_open_copy(clean_project, monkeypatch, capsy
     assert any('API unavailable' in error for error in meta['pdf_errors'])
 
 
-@pytest.mark.parametrize('args', [['search', 'x'], ['citations', 'W123'], ['lookup', 'x'], ['library', 'lookup', 'x']])
+@pytest.mark.parametrize('args', [['search', 'x'], ['citations', 'W123'], ['lookup', 'x']])
 def test_invalid_limit_is_rejected_before_io(clean_project, monkeypatch, args):
     monkeypatch.setattr(sources, 'get_json', lambda *a: (_ for _ in ()).throw(AssertionError('unexpected request')))
     assert main([*args, '--limit', '0']) == 2

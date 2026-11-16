@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from engine import index, papers, quotes, reports, sources
+from engine import index, papers, quotes, sources
 from engine.text import normalize, normalize_map
 
 
@@ -87,7 +87,8 @@ def test_qpdf_labels(monkeypatch):
 
 
 def test_index_lookup_and_show(project, capsys):
-    index.build(project)
+    from lumi.library import Library
+    Library(project.papers).rebuild_index()
     rows = index.lookup(project, "export control GPUs", 5)
     assert rows and rows[0][0] in ("W1", "W2")
     out = capsys.readouterr().out
@@ -105,16 +106,18 @@ def test_search_log_and_candidates(project, monkeypatch):
     assert rows[1]["status"] == "candidate"
     assert len(project.candidates()) == 1 and project.candidates()[0]["doi"] == "10.5/y"
     assert [r["new"] for r in project.search_log()] == [1, 0]
-    reports.build_field(project)
-    field = (project.field / "FIELD.md").read_text()
-    assert "| H1 | 2 | 1 | 1 |" in field and "Gao и др. 2024 «Export controls" in field
+    assert project.candidates()[0]["question"] == "H1"
+    assert not (project.field / "FIELD.md").exists()
 
 
-def test_cli_init_and_wrapper(tmp_path):
+def test_cli_init_and_project_entrypoint(tmp_path):
     from lumi.cli import main
     assert main(["init", str(tmp_path / "p"), "--name", "P"]) == 0
-    wrapper = tmp_path / "p" / "lumi"
-    out = subprocess.run([str(wrapper), "status"], capture_output=True, text=True)
+    import sys
+    from pathlib import Path
+    assert not (tmp_path / "p" / "lumi").exists()
+    out = subprocess.run([sys.executable, str(Path(__file__).resolve().parents[1] / "lumi.py"),
+                          "--project", str(tmp_path / "p"), "status"], capture_output=True, text=True)
     assert out.returncode == 0 and "# P" in out.stdout
 
 

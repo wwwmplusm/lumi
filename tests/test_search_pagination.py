@@ -256,7 +256,7 @@ def test_provider_id_containing_w_digits_is_not_openalex():
 def test_legacy_s2_candidate_resolves_and_is_marked(project, monkeypatch):
     raw = 'a' * 40
     item = {'paperId': raw, 'title': 'Old candidate'}
-    project.save_candidates([{'id': raw, 'title': 'Old candidate', 'decision': None}])
+    project.update_candidates(lambda rows: rows.append({'id': raw, 'title': 'Old candidate', 'decision': None}))
     monkeypatch.setattr(sources, 'get_json', lambda *a: item)
     monkeypatch.setattr(papers, 'pdf_candidates', lambda work: iter(()))
     assert main(['add', raw]) == 1

@@ -175,10 +175,7 @@ def find_elsewhere(project, identifier, quote):
     terms = sorted(set(re.findall(r"\w{5,}", quote.lower())), key=len, reverse=True)[:6]
     if not terms:
         return None
-    try:
-        rows = index.search_pages(project, " AND ".join(f'"{t}"' for t in terms), 5)
-    except Exception:
-        return None
+    rows = index.search_pages(project, " AND ".join(f'"{t}"' for t in terms), 5)
     for paper, page, _ in rows:
         if paper == identifier:
             continue

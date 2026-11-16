@@ -316,7 +316,7 @@ def test_fallback_order_is_easy_to_change(tmp_path, monkeypatch):
     meta["work"]["id"] = "https://openalex.org/W9"
     stored.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     planned = library.plan()
-    assert any(action.kind == "rename" and action.dst == "other2024widgets-W9" for action in planned)
+    assert not any(action.kind == "rename" for action in planned)
 
 
 def test_existing_hand_named_folder_is_not_renamed_to_the_generated_key(tmp_path):

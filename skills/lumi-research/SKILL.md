@@ -10,6 +10,9 @@ For discovery, read the project's context and existing library first. Propose a
 short search plan suited to the question. Use `search "QUERY" --db openalex`
 (or arxiv, crossref, s2, core, lens), `citations ID`, and `field candidates`.
 Search results record candidates and distinguish papers already in the library.
+New search-log events retain result IDs for repeated and already-library hits too.
+`field refs` lists missing references without a hidden result cap; `--min N` sets
+the minimum number of citing library papers (default 1). Incomplete metadata returns exit 1.
 Citation traversal is one hop. Set `--limit N` for the task; search pages are fetched
 until that limit, API exhaustion or an explicit failure. Citation output is limited
 to N per direction. Do not infer field coverage from it or from a lack of new results.
@@ -28,6 +31,7 @@ Use `--page` only for known printed labels; `pages KEY` shows the mapping.
 `«original words» [Author Year, PDF-с. 5]`. A successful text match does not
 validate the interpretation; assess methods, sample, dates and limitations.
 
+Use `parse` and `lookup` with `--library PATH` for a standalone library.
 `parse KEY` uses the recorded PDF version, including an existing OCR PDF.
 It does not perform OCR. Empty pages produce a partial extraction result and exit 1;
 inspect the listed PDF pages. Nonempty text on every page does not prove OCR accuracy.

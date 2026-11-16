@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Один главный результат для Lumi</title>
+<style>
+body{margin:0}
+[hidden]{display:none!important}
+/* Layout: one reading column; a sticky scoreboard on top; each decision is a "deal sheet": recap, options side by side, your call. */
+:root{
+  --bg:#F4F5F8; --surface:#FFFFFF; --ink:#11141B; --muted:#5B6373; --line:#D9DDE6;
+  --accent:#1D4ED8; --accent-soft:#E3EAFD; --mark:#FFE14A; --mark-ink:#11141B;
+  --good:#0E7A4B; --good-soft:#DDF3E8; --bad:#B4261F; --bad-soft:#FBE4E2; --warn:#9A5B00; --warn-soft:#FBEFD3;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Golos Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0E1117; --surface:#171B24; --ink:#EEF0F5; --muted:#9AA3B5; --line:#2A3040;
+  --accent:#7EA2FF; --accent-soft:#1B2644; --mark:#FFE14A; --mark-ink:#11141B;
+  --good:#5FD39A; --good-soft:#12301F; --bad:#FF8A82; --bad-soft:#3A1715; --warn:#F2B955; --warn-soft:#33270E;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0E1117; --surface:#171B24; --ink:#EEF0F5; --muted:#9AA3B5; --line:#2A3040;
+  --accent:#7EA2FF; --accent-soft:#1B2644; --mark:#FFE14A; --mark-ink:#11141B;
+  --good:#5FD39A; --good-soft:#12301F; --bad:#FF8A82; --bad-soft:#3A1715; --warn:#F2B955; --warn-soft:#33270E;
+  color-scheme:dark }
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:17px;line-height:1.55}
+.wrap{max-width:860px;margin:0 auto;padding-block:28px 80px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:44px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(26px,5.4vw,42px);font-weight:800;letter-spacing:-.01em}
+h2{font-size:clamp(20px,3.6vw,27px);font-weight:700}
+h3{font-size:17px;font-weight:700}
+p{margin:0;max-width:66ch}
+.stack{display:flex;flex-direction:column;gap:16px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
+mark{background:var(--mark);color:var(--mark-ink);padding:0 .22em;border-radius:3px;font-weight:700}
+.punch{font-size:20px;font-weight:600}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding-block:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.bar .track{flex:1 1 140px;height:8px;background:var(--line);border-radius:99px;overflow:hidden;min-width:100px}
+.bar .fill{height:100%;background:var(--accent);width:0;transition:width .25s}
+.bar .count{font-family:var(--mono);font-size:13px;font-weight:700}
+.bar .save{font-size:13px;color:var(--muted)}
+button{font:inherit;cursor:pointer}
+.btn{border:1px solid var(--ink);background:var(--ink);color:var(--bg);border-radius:8px;padding:8px 14px;font-weight:600;font-size:14px}
+.btn.ghost{background:transparent;color:var(--ink)}
+.btn:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:4px}
+.tile b{font-family:var(--display);font-size:30px;font-weight:800;line-height:1.05}
+.tile span{font-size:14px;color:var(--muted)}
+.tile.hot b{color:var(--bad)} .tile.ok b{color:var(--good)}
+.chart{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:12px}
+.row{display:grid;grid-template-columns:minmax(120px,190px) 1fr 74px;gap:10px;align-items:center;font-size:14px}
+.row .lab{min-width:0}
+.row .b{height:16px;background:var(--line);border-radius:4px;position:relative;overflow:hidden}
+.row .b i{position:absolute;inset:0 auto 0 0;background:var(--accent);border-radius:4px}
+.row .b i.red{background:var(--bad)} .row .b i.green{background:var(--good)} .row .b i.grey{background:var(--muted)}
+.row .v{font-family:var(--mono);font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.cap{font-size:13px;color:var(--muted)}
+@media (max-width:480px){.row{grid-template-columns:1fr 64px}.row .lab{grid-column:1/-1}}
+.tablewrap{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:520px}
+th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.neg{color:var(--bad);font-weight:700} .pos{color:var(--good);font-weight:700}
+.dec{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px;scroll-margin-top:70px}
+.dec.done{border-color:var(--good)}
+.dec header{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.dec .no{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--accent)}
+.dec .state{margin-left:auto;font-family:var(--mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--warn-soft);color:var(--warn)}
+.dec.done .state{background:var(--good-soft);color:var(--good)}
+.recap{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.recap div{border-left:3px solid var(--line);padding-left:12px;font-size:15px;min-width:0}
+.recap div.q{border-color:var(--warn)}
+.recap b{display:block;font-family:var(--mono);font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:2px}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:10px}
+.opt{position:relative;border:1.5px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;min-width:0;background:var(--bg)}
+.opt input{position:absolute;opacity:0;inset:0;width:100%;height:100%;cursor:pointer;margin:0}
+.opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.opt:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:2px}
+.opt .t{font-weight:700;font-size:15.5px;line-height:1.3}
+.opt .rec{align-self:flex-start;font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;background:var(--mark);color:var(--mark-ink);padding:2px 7px;border-radius:4px;font-weight:700}
+.opt ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px;font-size:14px}
+.opt li{display:grid;grid-template-columns:18px 1fr;gap:4px}
+.opt li::before{content:"·";font-weight:700}
+.opt li.p::before{content:"+";color:var(--good)} .opt li.m::before{content:"−";color:var(--bad)} .opt li.w::before{content:"?";color:var(--warn)}
+label.note{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--muted)}
+textarea{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:64px;resize:vertical;width:100%}
+.quote{border-left:4px solid var(--mark);padding:4px 0 4px 16px;font-size:19px;font-weight:600}
+.foot{font-size:13.5px;color:var(--muted)}
+.foot li{margin-bottom:4px}
+@media (prefers-reduced-motion:reduce){.bar .fill{transition:none}}
+
+.wrap{overflow-wrap:anywhere} table{min-width:0;table-layout:fixed} th,td{overflow-wrap:anywhere} a{color:var(--accent)} @media(max-width:480px){th,td{padding:8px;font-size:12px}.dec{padding:16px}.bar .save{flex-basis:100%}}
+</style>
+</head>
+<body><div class="wrap"><aside class="dec"><b>Опросник сохранён для истории. Ответы получены 16.11.2026.</b><p>Комментарии пользователя уточняют или отменяют варианты ниже. Актуальные решения — в <a href="../SPEC.md">спецификации</a>, исходные ответы — <a href="2026-11-16-user-answers.md">здесь</a>. Старые рекомендации этой страницы не являются новым планом.</p></aside><section class="stack"><span class="eyebrow">Lumi · обновление спеки · 16.11.2026 · раунд 1 из 2</span><h1>Один главный результат для Lumi</h1><p>Сначала решим, что Lumi делает отлично. Затем — что убрать из главного сценария. Основа — требования к поиску для диплома и текущий код. Ни один совет ниже ещё не является твоим решением.</p><p><b>Сценарий изменился.</b> v1 описывал факты и позиции. Уже согласованное направление v2 — поиск, сохранение и описание. Новое предложение добавляет рекурсивный обход и проверку данных.</p><p><b>Связи ещё не обходятся рекурсивно.</b> Текущая команда citations показывает соседей одной работы; сохраняемой очереди следующих поколений нет.</p><p><b>Литература и данные — два результата.</b> Полноценная проверка пригодности данных добавляет отдельный путь. Его место в первой версии открыто.</p><p class="cap">Поиск, скачивание и платные воркеры здесь не запускаются. Изменяются только документация и этот опросник. <a href="lumi-operating-decisions.html">Раунд 2: как работает проход</a>.</p></section><div class="bar" id="bar"><span class="count" id="count">0 / 7</span><div class="track"><div class="fill" id="fill"></div></div><span class="save" id="save">Загружаю ответы…</span><button class="btn ghost" id="copy" type="button">Скопировать ответы</button><button class="btn ghost" id="download" type="button">Скачать ответы</button></div><section class="stack"><h2>Что известно до выбора</h2><p>Ветвь — отдельное направление поиска. Поколение — ещё один переход по цитатным связям. Проход — работа с одной сохраняемой очередью.</p><div class="tiles"><div class="tile"><b>7</b><span>решений в этом раунде</span></div><div class="tile"><b>8</b><span>ветвей предложено в требованиях</span></div><div class="tile"><b>2</b><span>режима в требованиях: литература и данные</span></div><div class="tile"><b>41</b><span>локальный тест прошёл</span></div></div><div class="chart"><h3>Размер этого опросника</h3><div class="row"><span class="lab">Раунд 1 · продукт</span><div class="b"><i style="width:100%"></i></div><span class="v">7</span></div><div class="row"><span class="lab">Раунд 2 · проход</span><div class="b"><i class="green" style="width:100%"></i></div><span class="v">7</span></div><p class="cap">Единица — решение, а не функция или оценка готовности. Всего 14; отвечай по одному раунду.</p></div><p class="cap">Срез на 16.11.2026: требования §§3.1, 4, 6; engine/sources.py::citations; engine/reports.py::saturation. 41 тест: локальный pytest, без живых API. Подсчёт вопросов — по этой странице.</p><div class="tablewrap"><table><thead><tr><th>Уже задано</th><th>Что это означает</th></tr></thead><tbody><tr><td>Бриф 2018–2025</td><td>Это период наблюдений об организациях. Он не ограничивает годы публикации литературы.</td></tr><tr><td>Исходники и заметки сохраняются</td><td>Чистка репозитория не означает миграцию живой библиотеки.</td></tr><tr><td>Основание вывода видно</td><td>Аннотация не заменяет чтение; лимит не означает насыщение.</td></tr></tbody></table></div></section><section class="stack"><h2>Как ответы изменят репозиторий</h2><div class="tablewrap"><table><thead><tr><th>Когда</th><th>Изменение</th><th>Что нужно от тебя</th></tr></thead><tbody><tr><td>16.11.2026</td><td>Актуальный контекст отдельно от старых планов; исправленные ссылки.</td><td>Ничего: это отражение проверенного состояния.</td></tr><tr><td>После ответов на раунд 1</td><td>Зафиксировать основное обещание, первую версию и список отложенного.</td><td>P1–P7; можно выбрать свой вариант.</td></tr><tr><td>После раунда 2</td><td>Записать контракт прохода и критерии приёмки.</td><td>O1–O7; уточнить бюджет и контрольные работы.</td></tr><tr><td>Затем</td><td>Задачи кода → техническая репетиция на сохранённых ответах → живой пилот.</td><td>Только нерешённые вопросы, не повторное утверждение уже выбранного.</td></tr></tbody></table></div><p><b>Проверка:</b> каждое решение попадёт в docs/SPEC.md со своим ID; факты и догадки останутся раздельными. Текущий код проверяется тестами.</p><p><b>Откат:</b> исходные документы сохранены в локальной резервной копии; прежние планы доступны в docs/archive. Ответы сами код и данные не меняют.</p></section><section class="stack"><h2>7 решений</h2><p>Одна рекомендация на карточку. Ничего не выбрано заранее. Можно пропустить вопрос или предложить свой ответ. <b>P3 уточняет объём данных; при выборе данных в P2 пересмотри рекомендацию P3.</b></p></section><div id="decisions" class="stack" style="gap:22px"></div><section class="stack"><h2>Твои уточнения</h2><div class="dec" id="free"><label class="note" for="n_example">Контрольный пример: ветвь, вопрос, известные статьи и полезный результат<textarea id="n_example" data-free="example" placeholder="Назови ветвь или задачу, контрольные работы и результат, который примешь. Неизвестное можно оставить открытым."></textarea></label><label class="note" for="n_dates">Срок или событие, к которому нужен результат<textarea id="n_dates" data-free="dates" placeholder="Дата; что должно быть готово к ней"></textarea></label><label class="note" for="n_other">Что я упустил<textarea id="n_other" data-free="other" placeholder="Что нельзя потерять при упрощении?"></textarea></label></div><div class="foot"><p><b>Не проверено:</b> доступность и квоты API, качество покрытия поля, пригодность данных, качество PDF/OCR и реальное время прохода. Все бюджеты в вариантах — предложения, а не результаты измерения.</p><p>Мой рабочий совет: начать с одного вопроса и законченного пути до очереди чтения. Его можно отклонить. Точные пороги насыщения из старых планов не считаются утверждёнными.</p><p>Ответы хранятся локально в этом браузере. Я увижу их, когда ты пришлёшь текст через «Скопировать ответы» или скачанный файл. У каждого раунда отдельные ответы.</p><p><a href="lumi-operating-decisions.html">Открыть раунд 2</a> · <a href="../SPEC.md">Проект спеки</a> · <a href="../CONTEXT.md">Проверенный контекст</a></p></div></section></div><script>
+const D=[{"id": "P1", "t": "Для кого делаем ближайшую версию?", "now": "Бриф описывает диплом о китайских организациях и genAI. Старые планы обещают инструмент для разных исследований.", "q": "Разная аудитория требует разного объёма настройки и проверки.", "o": [{"k": "a", "t": "Сначала для твоего диплома", "l": [["p", "1 конкретный бриф и существующая библиотека для проверки."], ["m", "Другие темы пока не гарантируем."], ["w", "Не выбран один реальный вопрос для приёмки."]], "rec": 1}, {"k": "b", "t": "Для любых твоих исследований", "l": [["p", "Можно повторять работу на разных темах."], ["m", "Проверяем минимум 2 разных брифа — это предложение к объёму."], ["w", "Второго контрольного исследования пока нет."]]}, {"k": "c", "t": "Сразу для других исследователей", "l": [["p", "Проверяем понятность без твоих объяснений."], ["m", "Нужны установка, документация и поддержка чужих библиотек."], ["w", "Нет данных об их задачах и форматах."]]}]}, {"id": "P2", "t": "Какой результат Lumi должен делать лучше всего?", "now": "README v1 описывал факты и позиции. Согласованное направление v2 — поиск, сохранение и описание. Новое предложение добавляет рекурсивное discovery и проверку данных.", "q": "Если выбрать всё главным, у версии не будет одного критерия успеха.", "o": [{"k": "a", "t": "Найти важные работы и объяснить, что читать", "l": [["p", "Один путь: вопрос → связи → очередь чтения → доступные тексты."], ["m", "Автоматическое написание и управление выводами уходят из фокуса."], ["w", "Пользу очереди чтения ещё надо проверить на твоём вопросе."]], "rec": 1}, {"k": "b", "t": "Найти пригодные данные для проверки гипотез", "l": [["p", "Один путь: переменная → источник → проба → пригодность."], ["m", "Обход литературы становится вспомогательным."], ["w", "Доступность нужных полей и ключей соединения не проверена."]]}, {"k": "c", "t": "Помочь читать и отвечать с проверенными цитатами", "l": [["p", "Один путь: вопрос к библиотеке → страницы → проверенный ответ."], ["m", "Расширение корпуса остаётся отдельной задачей."], ["w", "Неясно, достаточно ли уже собранной библиотеки."]]}]}, {"id": "P3", "t": "Насколько глубоко делать режим данных в первой версии?", "now": "В предложении уже есть отдельный режим данных и реальная пробная выгрузка.", "q": "Это ещё один законченный сценарий, а не бесплатное дополнение к поиску статей. Если в P2 выбраны данные, вариант B естественнее.", "o": [{"k": "a", "t": "Источники данных из выбранных статей", "l": [["p", "Выдаём связи «переменная → источник» и документацию."], ["m", "Пригодность помечаем «не проверено» без реальной пробы."], ["w", "Хватит ли этого для твоего ближайшего шага?"]], "rec": 1}, {"k": "b", "t": "Матрица пригодности с реальными пробами", "l": [["p", "Проверяем поля, период, единицу наблюдения и соединение данных."], ["m", "Добавляется полный сценарий выгрузки и проверки."], ["w", "Нужен лимит пробы: см. O6 во втором раунде."]]}, {"k": "c", "t": "Отложить режим данных целиком", "l": [["p", "Первая версия закрывает только выбранный основной сценарий."], ["m", "За данными придётся идти отдельно."], ["w", "Допустима ли такая задержка для диплома?"]]}]}, {"id": "P4", "t": "Что делать со старым слоем фактов и позиций?", "now": "В коде есть claims, beliefs, extract, annotate и audit. Их данные и история уже имеют отдельную схему.", "q": "Убрать их из главного сценария можно без немедленного удаления данных и кода.", "o": [{"k": "a", "t": "Сохранить совместимость, остановить расширение", "l": [["p", "Существующие проекты продолжают работать; новые функции строим вокруг выбранного результата."], ["m", "Поддерживаем 2 слоя до отдельного решения о миграции."], ["w", "Реальное использование старых команд не измерено."]], "rec": 1}, {"k": "b", "t": "Сделать старый слой отдельным дополнительным режимом", "l": [["p", "Основной интерфейс становится короче."], ["m", "Нужны совместимые старые вызовы и обновление инструкций."], ["w", "Граница дополнительного режима ещё не спроектирована."]]}, {"k": "c", "t": "Готовить новую версию без этого слоя", "l": [["p", "Одна модель продукта после завершения перехода."], ["m", "Перед удалением нужны инвентаризация зависимостей и обратимый перенос."], ["w", "Неизвестно, какие живые проекты зависят от старого слоя."]]}]}, {"id": "P5", "t": "Где ты хочешь разбирать результат прохода?", "now": "Требования допускают таблицу по ветвям и локальный HTML. Сейчас отчёты движка — Markdown.", "q": "Нужен один основной результат, который ты реально прочитаешь.", "o": [{"k": "a", "t": "Файл с ветвями и очередью чтения", "l": [["p", "Один Markdown-отчёт рядом с проектом: ссылки, причины приоритета и пробелы."], ["m", "Нет интерактивных фильтров."], ["w", "Насколько большой отчёт удобно читать в твоём редакторе?"]], "rec": 1}, {"k": "b", "t": "Локальная страница с фильтрами", "l": [["p", "Ветки, годы и доступность текста можно переключать."], ["m", "Кроме сохранённых данных поддерживаем представление HTML."], ["w", "Нужные фильтры ещё не проверены на реальном корпусе."]]}, {"k": "c", "t": "Короткий ответ агента и подробный файл", "l": [["p", "Сначала решение «что читать», затем проверяемые детали по ссылке."], ["m", "Основное представление зависит от качества агента."], ["w", "Какой объём ответа удобен тебе?"]]}]}, {"id": "P6", "t": "Какие языки должны пройти приёмку первой версии?", "now": "Китайский поиск нужен там, где оправдан вопросом. В архиве отдельно исследованы российские и китайские источники.", "q": "Поиск на языке, доступ к базе и извлечение текста — разные задачи. Адаптер ещё не доказывает их работу.", "o": [{"k": "a", "t": "Английский и целевая китайская ветвь", "l": [["p", "2 языка проверяем на конкретных нуждах диплома; другие не запрещены."], ["m", "Не обещаем равное покрытие всех языков."], ["w", "Для китайской ветви ещё не выбран контрольный набор."]], "rec": 1}, {"k": "b", "t": "Английский, китайский и русский одинаково", "l": [["p", "3 языка входят в критерии первого выпуска."], ["m", "Для каждого нужны примеры поиска, доступа и чтения."], ["w", "Доступность провайдеров и качество извлечения не испытаны."]]}, {"k": "c", "t": "Первый пилот только на английском", "l": [["p", "1 язык позволяет быстрее проверить весь путь."], ["m", "Китайская ветвь остаётся явным пробелом; вывод о полноте недопустим."], ["w", "Достаточен ли такой пилот для следующего решения?"]]}]}, {"id": "P7", "t": "Какой объём должен пройти первый живой пилот?", "now": "В требованиях предложено 8 ветвей и проверка минимум второго поколения цитатных связей.", "q": "Применимо при P2=A. Если главным выбраны данные или чтение, оставь этот вопрос без выбора и опиши их контрольный сценарий ниже. Техническая репетиция на сохранённых ответах предшествует любому живому пилоту.", "o": [{"k": "a", "t": "Полный сценарий на одной ветви", "l": [["p", "1 ветвь: 2 поколения, независимый поиск, остановка и продолжение, выбранные тексты."], ["m", "Не выдаём это за покрытие остальных 7 ветвей."], ["w", "Укажи ветвь и известные важные статьи в свободном поле."]], "rec": 1}, {"k": "b", "t": "Все восемь предложенных ветвей", "l": [["p", "Сразу видна разница в покрытии по всему вопросу."], ["m", "8 ветвей требуют отдельной оценки релевантности и полноты прохода."], ["w", "Бюджет и время пока не измерены."]]}]}];
+const COL="lumi_spec_20261116_round1_v1";
+const state={}; const free={};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function render(){
+  $("#decisions").innerHTML=D.map((d,i)=>`
+  <article class="dec" id="${d.id}">
+    <header><span class="no">${esc(d.id)} · Решение ${i+1}</span><h3>${esc(d.t)}</h3><span class="state">открыто</span></header>
+    <div class="recap"><div><b>Что сейчас</b>${esc(d.now)}</div><div class="q"><b>Где вопрос открыт</b>${esc(d.q)}</div></div>
+    <div class="opts" role="radiogroup" aria-label="${esc(d.t)}">${d.o.map(o=>`
+      <label class="opt"><input type="radio" name="${d.id}" id="${d.id}_${o.k}" value="${o.k}">
+        ${o.rec?'<span class="rec">мой совет</span>':''}<span class="t">${esc(o.t)}</span>
+        <ul>${o.l.map(x=>`<li class="${x[0]}"><span>${esc(x[1])}</span></li>`).join("")}</ul></label>`).join("")}
+      <label class="opt"><input type="radio" name="${d.id}" id="${d.id}_x" value="x"><span class="t">Ни один не подходит</span><ul><li><span>Напиши свой вариант в комментарии</span></li></ul></label>
+    </div>
+    <button class="btn ghost" type="button" data-clear="${d.id}">Снять выбор</button><label class="note" for="${d.id}_note">Комментарий или свой вариант
+      <textarea id="${d.id}_note" data-note="${d.id}" placeholder="Необязательно"></textarea></label>
+  </article>`).join("");
+}
+function paint(){
+  let n=0;
+  D.forEach(d=>{const s=state[d.id]||{};const el=document.getElementById(d.id);
+    if(s.choice)n++;el.querySelectorAll("input[type=radio]").forEach(r=>r.checked=r.value===s.choice)
+    el.classList.toggle("done",!!s.choice); el.querySelector(".state").textContent=s.choice?"решено":"открыто";
+    const ta=document.getElementById(d.id+"_note"); if(document.activeElement!==ta&&s.note!=null)ta.value=s.note;});
+  document.querySelectorAll("[data-free]").forEach(ta=>{const v=free[ta.dataset.free];if(document.activeElement!==ta&&v!=null)ta.value=v});
+  $("#count").textContent=n+" / "+D.length; $("#fill").style.width=(n/D.length*100)+"%";
+}
+let db=null; const say=t=>{$("#save").textContent=t};
+function local(){try{localStorage.setItem(COL,JSON.stringify({state,free}));return true}catch(e){return false}}
+async function persist(id){
+  const saved=local();
+  if(!db){say(saved?"Сохранено в этом браузере":"Не сохранено. Скопируй или скачай ответы");return}
+  say("Сохраняю…");
+  try{
+    if(id==="free") await db.doc(COL+"/free").set({...free});
+    else await db.doc(COL+"/"+id).set({choice:state[id].choice||"",label:labelOf(id),note:state[id].note||""});
+    say("Сохранено");
+  }catch(e){say("Не сохранилось. Нажми «Скопировать ответы»")}
+}
+function labelOf(id){const d=D.find(x=>x.id===id),c=(state[id]||{}).choice;if(!c)return"";if(c==="x")return"Ни один не подходит";const o=d.o.find(o=>o.k===c);return o?o.t:""}
+document.addEventListener("click",e=>{const id=e.target.dataset.clear;if(id){state[id]={note:(state[id]||{}).note||""};paint();persist(id)}});
+const timers={};
+function later(id){local();clearTimeout(timers[id]);timers[id]=setTimeout(()=>persist(id),900)}
+document.addEventListener("change",e=>{const t=e.target;if(t.type==="radio"){state[t.name]={...(state[t.name]||{}),choice:t.value};paint();persist(t.name)}});
+document.addEventListener("input",e=>{const t=e.target;
+  if(t.dataset.note){state[t.dataset.note]={...(state[t.dataset.note]||{}),note:t.value};later(t.dataset.note)}
+  if(t.dataset.free){free[t.dataset.free]=t.value;later("free")}});
+function summary(){
+  const lines=D.map((d,i)=>{const s=state[d.id]||{};return `${d.id}. ${d.t}: ${s.choice?labelOf(d.id):"не решено"}${s.note?` | ${s.note}`:""}`});
+  [["example", "Контрольный пример: ветвь, вопрос, известные статьи и полезный результат"], ["dates", "Срок или событие, к которому нужен результат"], ["other", "Что я упустил"]].forEach(([k,n])=>{if(free[k])lines.push(`${n}: ${free[k]}`)});
+  return "Lumi · раунд 1 · 16.11.2026\n"+lines.join("\n");
+}
+$("#copy").addEventListener("click",async()=>{const txt=summary();
+  try{await navigator.clipboard.writeText(txt);say("Ответы скопированы")}
+  catch(e){const ta=document.createElement("textarea");ta.value=txt;ta.style.minHeight="220px";ta.id="copyout";
+    const old=document.getElementById("copyout");if(old)old.remove();$("#free").appendChild(ta);ta.focus();ta.select();say("Выдели текст внизу и скопируй")}});
+function start(){
+  render();
+  try{const l=JSON.parse(localStorage.getItem(COL)||"null");if(l){Object.assign(state,l.state||{});Object.assign(free,l.free||{})}}catch(e){}
+  paint();
+  const timer=setTimeout(()=>{if(!db)say("Локальные ответы. Пришли их через «Скопировать ответы»")},10000);
+  Promise.resolve(null).then(async h=>{
+    clearTimeout(timer);
+    if(!h){say("Локальные ответы. Пришли их через «Скопировать ответы»");return}
+    db=h;
+    try{const snap=await db.collection(COL).get();
+      snap.docs.forEach(doc=>{const v=doc.data()||{};
+        if(doc.id==="free")Object.assign(free,v); else state[doc.id]={choice:v.choice||"",note:v.note||""}});
+      paint();say(snap.empty?"Ответы сохраняются сами":"Твои ответы загружены");
+    }catch(e){say("Не удалось загрузить ответы")}
+  }).catch(()=>say("Локальные ответы. Пришли их через «Скопировать ответы»"));
+}
+document.getElementById("download").addEventListener("click",()=>{const url=URL.createObjectURL(new Blob([summary()],{type:"text/plain;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download=COL+"-answers.txt";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)});
+start();
+</script></body></html>

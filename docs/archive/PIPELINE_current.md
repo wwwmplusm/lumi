@@ -1,3 +1,5 @@
+> Архив. Сохранено для истории; текущие границы продукта — в [product.md](../product.md). Команды и пути ниже могут быть устаревшими.
+
 # Knowledge pipeline — reference
 
 State as of 2026-10-10 (commit 234f392). One script, `research/library.py`; no Zotero or hosted services. LLM steps run as sterile headless workers that `library.py` launches itself. Design rationale: `research/tooling_design_2026-10-09/HANDOFF.md` (Session 5). Run history: `sessions/2026-10-09-night.md`.

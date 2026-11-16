@@ -1,3 +1,0 @@
-#!/bin/sh
-# Обёртка проекта над движком Eurema.
-exec python3 "$(dirname "$0")/{{ENGINE_REL}}/eurema.py" --project "$(dirname "$0")" "$@"

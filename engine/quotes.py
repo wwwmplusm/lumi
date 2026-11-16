@@ -223,9 +223,11 @@ def check_one(project, ref, quote, page=None, pdf_page=None):
     identifier = papers.resolve(project, ref)
     meta = papers.load_meta(project, identifier)
     hint = pdf_page or (papers.pdf_page_of(meta, page) if page else None)
+    if page is not None and hint is None and not meta.get("page_labels") and str(page).isdigit():
+        hint = int(page)
     result = locate(project, identifier, quote, hint)
     result["cited_page"] = f"с. {page}" if page else (f"PDF-с. {pdf_page}" if pdf_page else None)
-    if result["verdict"] in ACCEPTED and hint and result["page"] != hint:
+    if result["verdict"] in ACCEPTED and (page is not None or pdf_page is not None) and (hint is None or result["page"] != hint):
         result["page_wrong"] = True
     return result
 

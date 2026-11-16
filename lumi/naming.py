@@ -38,7 +38,7 @@ COLLISION_ALPHABETS = {
 
 # Proposal. Tried in order when a work has no OpenAlex id. OpenAlex always
 # wins over this list; that part is decided, not a proposal.
-FALLBACK_SUFFIXES = ("doi", "arxiv", "local")
+FALLBACK_SUFFIXES = ("doi", "arxiv", "provider", "local")
 
 # Unattested in the 52 surnames. "cut" keeps the text before the first hyphen
 # (Fei-Fei → fei), which matches Google Scholar's export.
@@ -89,7 +89,7 @@ _DASHES = "-\u2010\u2011\u2012\u2013\u2014\u2015\u2212"
 _GENERATIONAL = frozenset({"jr", "sr", "ii", "iii", "iv", "v", "phd", "md"})
 # Underscores are allowed in doi_/arxiv_ tokens because sanitize_token turns "/" into "_".
 _FOLDER_RE = re.compile(
-    r"^(?P<key>[a-z0-9]+)-(?P<suffix>W\d+|doi_[A-Za-z0-9._]+|arxiv_[A-Za-z0-9._]+|local_[0-9a-f]{8})$"
+    r"^(?P<key>[a-z0-9]+)-(?P<suffix>W\d+|doi_[A-Za-z0-9._]+|arxiv_[A-Za-z0-9._]+|provider_(?:core|lens|s2)_[A-Za-z0-9._]+|local_[0-9a-f]{8})$"
 )
 _LEGACY_RE = re.compile(r"^W\d+$", re.I)
 
@@ -317,9 +317,9 @@ def openalex_id_of(work):
     for candidate in candidates:
         if not candidate:
             continue
-        match = re.search(r"W\d+", str(candidate), re.I)
-        if match:
-            return match.group(0).upper()
+        found = openalex_id_from_text(candidate)
+        if found:
+            return found
     return None
 
 
@@ -354,7 +354,7 @@ def openalex_id_from_text(value):
 
 
 class FolderName:
-    """Parsed ``<key>-<suffix>`` folder. ``kind`` is openalex, doi, arxiv, or local."""
+    """Parsed ``<key>-<suffix>`` folder. ``kind`` is openalex, doi, arxiv, provider, or local."""
 
     def __init__(self, key, kind, ident):
         self.key = key
@@ -394,7 +394,7 @@ def folder_name_for(key, work, pdf_sha256=None, *, fallbacks=None):
     """Folder name for a new work. Existing folders are not passed through here.
 
     OpenAlex id → ``<key>-W…``. Otherwise the first available entry of
-    ``FALLBACK_SUFFIXES`` (proposal): ``doi_``, ``arxiv_``, ``local_``.
+    ``FALLBACK_SUFFIXES`` (proposal): ``doi_``, ``arxiv_``, ``provider_``, ``local_``.
     """
     oa = openalex_id_of(work or {})
     if oa:
@@ -403,12 +403,14 @@ def folder_name_for(key, work, pdf_sha256=None, *, fallbacks=None):
     doi = sanitize_token(bare_doi((work or {}).get("doi")))
     arxiv = arxiv_id_of(work or {})
     local = (pdf_sha256 or "")[:8].lower()
-    available = {"doi": doi, "arxiv": arxiv, "local": local if len(local) == 8 else ""}
+    native = str((work or {}).get("id") or "")
+    provider = sanitize_token(native) if re.fullmatch(r"(?:core|lens|s2):[A-Za-z0-9_-]+", native) else ""
+    available = {"doi": doi, "arxiv": arxiv, "provider": provider, "local": local if len(local) == 8 else ""}
     for kind in order:
         token = available.get(kind) or ""
         if token:
             return f"{key}-{kind}_{token}"
-    raise ValueError("cannot name a folder: no OpenAlex id, DOI, arXiv id, or PDF sha256")
+    raise ValueError("cannot name a folder: no OpenAlex id, DOI, arXiv id, provider id, or PDF sha256")
 
 
 def resolve_ref(names, ref, keys=None):

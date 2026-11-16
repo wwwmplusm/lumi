@@ -3,6 +3,7 @@
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -12,15 +13,12 @@ from .project import append_jsonl, today
 
 OPENALEX = "https://api.openalex.org"
 ARXIV = "https://export.arxiv.org/api/query"
-ORCID = "https://pub.orcid.org/v3.0"
 LENS = "https://api.lens.org/scholarly/search"
 CROSSREF = "https://api.crossref.org/works"
 S2 = "https://api.semanticscholar.org/graph/v1/paper/search"
 CORE = "https://api.core.ac.uk/v3/search/works"
-PATENTSVIEW = "https://search.patentsview.org/api/v1/patent/"
-WORLDBANK = "https://api.worldbank.org/v2"
 ATOM = {"a": "http://www.w3.org/2005/Atom"}
-USER_AGENT = "eurema/1.0 (academic personal use)"
+USER_AGENT = "lumi/1.0 (academic personal use)"
 NET_ERRORS = (OSError, ValueError, KeyError, urllib.error.URLError, ET.ParseError)
 
 
@@ -55,6 +53,23 @@ def work_id(raw):
 
 
 def fetch_work(raw):
+    native = provider_id(raw)
+    if native:
+        provider, identifier = native.split(":", 1)
+        if provider == "s2":
+            key = os.environ.get("S2_API_KEY")
+            params = urllib.parse.urlencode({"fields": "title,year,citationCount,externalIds,authors,abstract,openAccessPdf"})
+            item = get_json(f"https://api.semanticscholar.org/graph/v1/paper/{identifier}?{params}",
+                            {"x-api-key": key} if key else None)
+            return s2_row(item)["work"]
+        if provider == "core":
+            key = required_key("CORE_API_KEY")
+            return core_row(get_json(f"https://api.core.ac.uk/v3/works/{identifier}", {"Authorization": f"Bearer {key}"}))["work"]
+        data = lens_request({"query": {"term": {"lens_id": identifier}}, "size": 1})
+        items = data.get("data") or []
+        if not items:
+            raise ValueError(f"нет работы {native} в Lens")
+        return lens_row(items[0])["work"]
     return get_json(f"{OPENALEX}/works/{urllib.parse.quote(work_id(raw), safe=':/.')}")
 
 
@@ -87,6 +102,10 @@ def library_ids(project):
         openalex = openalex_id_from_folder(name)
         if openalex:
             found.add(openalex)
+    for folder in folders:
+        work = json.loads((project.papers / folder / "metadata.json").read_text(encoding="utf-8")).get("work") or {}
+        if work.get("id"):
+            found.add(provider_id(work["id"]) or short_id(work))
     return found
 
 
@@ -96,17 +115,21 @@ def record_search(project, db, query, rows, question=None):
     library = library_ids(project)
     library_dois = {d for d in (doi_of(project, w) for w in folders) if d}
     candidates = project.candidates()
-    known = {c["id"] for c in candidates} | {(c.get("doi") or "").lower() for c in candidates if c.get("doi")}
+    known = {provider_id(c["id"]) or c["id"] for c in candidates} | {(c.get("doi") or "").lower().replace("https://doi.org/", "") for c in candidates if c.get("doi")}
     new = 0
     for row in rows:
         doi = (row.get("doi") or "").lower().replace("https://doi.org/", "")
-        row["status"] = "library" if row["id"] in library or (doi and doi in library_dois) else ("candidate" if row["id"] in known or (doi and doi in known) else "new")
+        row["status"] = "library" if (provider_id(row["id"]) or row["id"]) in library or (doi and doi in library_dois) else ("candidate" if (provider_id(row["id"]) or row["id"]) in known or (doi and doi in known) else "new")
         if row["status"] == "new":
             new += 1
-            candidates.append({"id": row["id"], "doi": doi or None, "title": row.get("title"), "year": row.get("year"), "question": question, "db": db, "source_query": query, "date": today(), "decision": None})
-            known.add(row["id"])
+            candidates.append({"id": row["id"], "doi": doi or None, "title": row.get("title"), "year": row.get("year"), "question": question, "db": db, "source_query": query, "date": today(), "decision": None, **({"work": row["work"]} if row.get("work") else {})})
+            known.add(provider_id(row["id"]) or row["id"])
+            if doi:
+                known.add(doi)
     project.save_candidates(candidates)
-    append_jsonl(project.field / "search_log.jsonl", {"date": today(), "db": db, "query": query, "question": question, "found": len(rows), "new": new})
+    append_jsonl(project.field / "search_log.jsonl", {"date": today(), "db": db, "query": query, "question": question, "found": len(rows), "new": new,
+                  "stop": getattr(rows, "stop", "complete"), "error": getattr(rows, "error", None),
+                  "requested": getattr(rows, "requested", None), "requests": getattr(rows, "requests", None)})
     return rows
 
 
@@ -129,69 +152,213 @@ def print_rows(rows):
 
 # --- databases ---------------------------------------------------------------------
 
+class SearchResults(list):
+    """Rows and explicit completion information; never confuse failure with exhaustion."""
+    def __init__(self, requested):
+        super().__init__()
+        self.requested = requested
+        self.requests = 0
+        self.stop = "exhausted"
+        self.error = None
+
+
+def collect_pages(fetch, limit, page_size=100, start=None, delay=0, stable_cursor=False):
+    """fetch(cursor, size) -> (rows, next_cursor). Preserve pages on later failure."""
+    result = SearchResults(limit)
+    cursor, seen_cursors, seen_ids = start, set(), set()
+    while len(result) < limit:
+        try:
+            if cursor in seen_cursors and not stable_cursor:
+                raise ValueError("API повторил курсор; продолжение остановлено")
+            seen_cursors.add(cursor)
+            if result.requests and delay:
+                time.sleep(delay)
+            result.requests += 1
+            batch, next_cursor = fetch(cursor, min(page_size, limit - len(result)))
+            previous = len(result)
+            for row in batch:
+                identity = row["id"]
+                if not identity:
+                    raise ValueError("API вернул работу без идентификатора")
+                if identity not in seen_ids:
+                    result.append(row)
+                    seen_ids.add(identity)
+                    if len(result) == limit:
+                        break
+            if len(result) == limit:
+                result.stop = "limit"
+                break
+            if next_cursor is None:
+                break
+            if len(result) == previous:
+                raise ValueError("API не продвинул выдачу; продолжение остановлено")
+            cursor = next_cursor
+        except NET_ERRORS as exc:
+            from .onboarding import redact
+            result.stop, result.error = "partial", redact(str(exc))
+            break
+    return result
+
+
+def result_status(rows):
+    if getattr(rows, "error", None):
+        print(f"Неполный результат: {len(rows)} работ; {rows.error}")
+        return 1
+    if isinstance(rows, SearchResults):
+        reason = "достигнут заданный --limit" if rows.stop == "limit" else "выдача API исчерпана"
+        print(f"Поиск: {len(rows)} работ, запросов {rows.requests}; {reason}")
+    return 0
+
+
+def oa_row(work):
+    return {"id": short_id(work), "doi": work.get("doi"), "title": title(work),
+            "year": work.get("publication_year"), "cites": work.get("cited_by_count") or 0,
+            "extra": work.get("doi") or ""}
+
+
+def openalex_pages(params, limit):
+    def page(cursor, size):
+        data = get_json(f"{OPENALEX}/works?{urllib.parse.urlencode({**params, 'per_page': size, 'cursor': cursor})}")
+        rows = [oa_row(w) for w in data.get("results", [])]
+        return rows, (data.get("meta") or {}).get("next_cursor") if rows else None
+    return collect_pages(page, limit, start="*")
+
+
 def openalex(query, limit):
-    data = get_json(f"{OPENALEX}/works?{urllib.parse.urlencode({'search': query, 'per_page': limit})}")
-    return [{"id": short_id(w), "doi": w.get("doi"), "title": title(w), "year": w.get("publication_year"), "cites": w.get("cited_by_count") or 0, "extra": w.get("doi") or ""} for w in data.get("results", [])]
+    return openalex_pages({"search": query}, limit)
 
 
 def arxiv(query, limit):
-    params = urllib.parse.urlencode({"search_query": query, "max_results": limit, "sortBy": "relevance"})
-    request = urllib.request.Request(f"{ARXIV}?{params}", headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        feed = ET.fromstring(response.read())
-    rows = []
-    for entry in feed.findall("a:entry", ATOM):
-        arxiv_id = re.sub(r"v\d+$", "", entry.findtext("a:id", "", ATOM).rsplit("/abs/", 1)[-1])
-        names = [x.findtext("a:name", "", ATOM) for x in entry.findall("a:author", ATOM)]
-        rows.append({"id": arxiv_id, "doi": f"10.48550/arxiv.{arxiv_id}", "title": " ".join(entry.findtext("a:title", "", ATOM).split()), "year": entry.findtext("a:published", "", ATOM)[:4], "extra": ", ".join(names[:5]) + (" et al." if len(names) > 5 else "")})
-    return rows
+    def page(offset, size):
+        params = urllib.parse.urlencode({"search_query": query, "start": offset, "max_results": size, "sortBy": "relevance"})
+        request = urllib.request.Request(f"{ARXIV}?{params}", headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            feed = ET.fromstring(response.read())
+        rows = []
+        for entry in feed.findall("a:entry", ATOM):
+            arxiv_id = re.sub(r"v\d+$", "", entry.findtext("a:id", "", ATOM).rsplit("/abs/", 1)[-1])
+            if arxiv_id.endswith("api/errors") or "api/errors#" in arxiv_id:
+                raise ValueError(entry.findtext("a:summary", "arXiv error", ATOM))
+            names = [x.findtext("a:name", "", ATOM) for x in entry.findall("a:author", ATOM)]
+            rows.append({"id": arxiv_id, "doi": f"10.48550/arxiv.{arxiv_id}", "title": " ".join(entry.findtext("a:title", "", ATOM).split()), "year": entry.findtext("a:published", "", ATOM)[:4], "extra": ", ".join(names[:5]) + (" et al." if len(names) > 5 else "")})
+        return rows, offset + len(rows) if len(rows) == size else None
+    return collect_pages(page, limit, start=0, delay=3)
 
 
 def crossref(query, limit):
-    params = {"query": query, "rows": limit}
-    if os.environ.get("UNPAYWALL_EMAIL"):
-        params["mailto"] = os.environ["UNPAYWALL_EMAIL"]
-    rows = []
-    for item in get_json(f"{CROSSREF}?{urllib.parse.urlencode(params)}")["message"].get("items", []):
-        year = ((item.get("issued") or {}).get("date-parts") or [[None]])[0][0]
-        rows.append({"id": item.get("DOI"), "doi": item.get("DOI"), "title": " ".join(item.get("title") or ["?"]), "year": year, "cites": item.get("is-referenced-by-count") or 0, "extra": " / ".join(item.get("container-title") or [])})
-    return rows
+    def page(cursor, size):
+        params = {"query": query, "rows": size, "cursor": cursor}
+        if os.environ.get("UNPAYWALL_EMAIL"):
+            params["mailto"] = os.environ["UNPAYWALL_EMAIL"]
+        data = get_json(f"{CROSSREF}?{urllib.parse.urlencode(params)}")["message"]
+        rows = []
+        for item in data.get("items", []):
+            year = ((item.get("issued") or {}).get("date-parts") or [[None]])[0][0]
+            rows.append({"id": item.get("DOI"), "doi": item.get("DOI"), "title": " ".join(item.get("title") or ["?"]), "year": year, "cites": item.get("is-referenced-by-count") or 0, "extra": " / ".join(item.get("container-title") or [])})
+        return rows, data.get("next-cursor") if len(rows) == size else None
+    return collect_pages(page, limit, start="*")
+
+
+def provider_id(raw):
+    raw = str(raw).strip()
+    if re.fullmatch(r"(?:core|lens|s2):[A-Za-z0-9_-]+", raw, re.I):
+        name, identifier = raw.split(":", 1)
+        return name.lower() + ":" + (identifier.lower() if name.lower() == "s2" else identifier)
+    if re.fullmatch(r"[0-9a-f]{40}", raw, re.I):
+        return "s2:" + raw.lower()
+    return None
+
+
+def provider_work(provider, identifier, title_, year, authors, doi=None, abstract=None, pdf=None, cites=0, original=None):
+    """Common bibliographic shape, with native identity and unchanged source record."""
+    work = {"id": f"{provider}:{identifier}", "display_name": title_, "publication_year": year,
+            "doi": doi, "abstract_text": abstract or "", "cited_by_count": cites or 0,
+            "authorships": [{"author": {"display_name": name}} for name in authors if name],
+            "provider": provider, "provider_record": original or {}}
+    if pdf:
+        work["best_oa_location"] = {"is_oa": True, "pdf_url": pdf}
+    return work
+
+
+def provider_row(work):
+    return {"id": work.get("doi") or work["id"], "doi": work.get("doi"), "title": work["display_name"],
+            "year": work.get("publication_year"), "cites": work.get("cited_by_count") or 0, "work": work}
+
+
+def s2_row(paper):
+    ids = paper.get("externalIds") or {}
+    doi = ids.get("DOI") or (f"10.48550/arxiv.{ids['ArXiv']}" if ids.get("ArXiv") else None)
+    work = provider_work("s2", paper["paperId"], paper.get("title"), paper.get("year"),
+                         [a.get("name") for a in paper.get("authors") or []], doi, paper.get("abstract"),
+                         (paper.get("openAccessPdf") or {}).get("url"), paper.get("citationCount"), paper)
+    return provider_row(work)
 
 
 def semantic_scholar(query, limit):
-    params = urllib.parse.urlencode({"query": query, "limit": limit, "fields": "title,year,citationCount,externalIds"})
     key = os.environ.get("S2_API_KEY")
-    rows = []
-    for paper in get_json(f"{S2}?{params}", {"x-api-key": key} if key else None).get("data") or []:
-        ids = paper.get("externalIds") or {}
-        doi = ids.get("DOI") or (f"10.48550/arxiv.{ids['ArXiv']}" if ids.get("ArXiv") else None)
-        rows.append({"id": doi or paper["paperId"], "doi": doi, "title": paper.get("title"), "year": paper.get("year"), "cites": paper.get("citationCount") or 0})
-    return rows
+    def page(offset, size):
+        if offset >= 1000:
+            raise ValueError("Semantic Scholar relevance API ограничен 1000 результатами; уточните запрос или выберите другой коннектор")
+        params = urllib.parse.urlencode({"query": query, "offset": offset, "limit": min(size, 1000-offset),
+                                        "fields": "title,year,citationCount,externalIds,authors,abstract,openAccessPdf"})
+        data = get_json(f"{S2}?{params}", {"x-api-key": key} if key else None)
+        rows = [s2_row(p) for p in data.get("data") or []]
+        next_offset = data.get("next")
+        if next_offset is None and offset + len(rows) < (data.get("total") or 0) and rows:
+            next_offset = offset + len(rows)
+        return rows, next_offset
+    return collect_pages(page, limit, start=0)
+
+
+def required_key(name):
+    key = os.environ.get(name)
+    if not key:
+        raise ValueError(f"нужен {name}; используйте lumi setup")
+    return key
+
+
+def core_row(item):
+    work = provider_work("core", item["id"], item.get("title"), item.get("yearPublished"),
+                         [a.get("name") if isinstance(a, dict) else a for a in item.get("authors") or []],
+                         item.get("doi"), item.get("abstract"), item.get("downloadUrl"), original=item)
+    return provider_row(work)
 
 
 def core(query, limit):
-    key = os.environ.get("CORE_API_KEY")
-    if not key:
-        raise ValueError("нужен CORE_API_KEY (бесплатно: https://core.ac.uk/services/api)")
-    rows = []
-    for work in get_json(f"{CORE}?{urllib.parse.urlencode({'q': query, 'limit': limit})}", {"Authorization": f"Bearer {key}"}).get("results") or []:
-        rows.append({"id": work.get("doi") or f"core:{work.get('id')}", "doi": work.get("doi"), "title": work.get("title"), "year": work.get("yearPublished"), "extra": work.get("downloadUrl") or "нет полного текста"})
-    return rows
+    key = required_key("CORE_API_KEY")
+    def page(offset, size):
+        data = get_json(f"{CORE}?{urllib.parse.urlencode({'q': query, 'limit': size, 'offset': offset})}", {"Authorization": f"Bearer {key}"})
+        rows = [core_row(w) for w in data.get("results") or []]
+        more = len(rows) == size
+        if data.get("totalHits") is not None:
+            more = offset + len(rows) < data["totalHits"] and bool(rows)
+        return rows, offset + len(rows) if more else None
+    return collect_pages(page, limit, start=0)
+
+
+def lens_request(body):
+    token = required_key("LENS_TOKEN")
+    request = urllib.request.Request(LENS, data=json.dumps(body).encode(), headers={"User-Agent": USER_AGENT, "Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return {} if response.status == 204 else json.load(response)
+
+
+def lens_row(item):
+    ids = {x.get("type"): x.get("value") for x in item.get("external_ids") or []}
+    authors = [" ".join(filter(None, [a.get("first_name"), a.get("last_name")])) or a.get("display_name", "") for a in item.get("authors") or []]
+    work = provider_work("lens", item["lens_id"], item.get("title"), item.get("year_published"), authors,
+                         ids.get("doi"), item.get("abstract"), cites=item.get("scholarly_citations_count"), original=item)
+    return provider_row(work)
 
 
 def lens(query, limit):
-    token = os.environ.get("LENS_TOKEN")
-    if not token:
-        raise ValueError("нужен LENS_TOKEN (https://www.lens.org/lens/user/subscriptions)")
-    body = json.dumps({"query": query, "size": limit, "include": ["lens_id", "title", "year_published", "external_ids", "scholarly_citations_count", "patent_citations_count"]}).encode()
-    request = urllib.request.Request(LENS, data=body, headers={"User-Agent": USER_AGENT, "Content-Type": "application/json", "Authorization": f"Bearer {token}"})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        data = json.load(response)
-    rows = []
-    for work in data.get("data") or []:
-        ids = {x.get("type"): x.get("value") for x in work.get("external_ids") or []}
-        rows.append({"id": ids.get("doi") or f"lens:{work.get('lens_id')}", "doi": ids.get("doi"), "title": work.get("title"), "year": work.get("year_published"), "cites": work.get("scholarly_citations_count") or 0, "extra": f"{work.get('patent_citations_count') or 0} цитирований в патентах"})
-    return rows
+    required_key("LENS_TOKEN")
+    def page(cursor, size):
+        body = {"scroll_id": cursor, "scroll": "1m"} if cursor else {"query": query, "size": size, "scroll": "1m"}
+        data = lens_request(body)
+        rows = [lens_row(w) for w in data.get("data") or []]
+        return rows, data.get("scroll_id") if rows else None
+    return collect_pages(page, limit, stable_cursor=True)
 
 
 DATABASES = {"openalex": openalex, "arxiv": arxiv, "crossref": crossref, "s2": semantic_scholar, "core": core, "lens": lens}
@@ -202,58 +369,27 @@ def search(project, db, query, limit, question=None):
     return record_search(project, db, query, rows, question)
 
 
-# --- not paper searches (printed only, logged) -----------------------------------------
-
-def orcid(query, limit):
-    match = re.search(r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]", query)
-    if not match:
-        for person in get_json(f"{ORCID}/expanded-search/?{urllib.parse.urlencode({'q': query, 'rows': limit})}").get("expanded-result") or []:
-            name = f"{person.get('given-names') or ''} {person.get('family-names') or ''}".strip()
-            print(f"{person['orcid-id']} | {name} | {'; '.join(person.get('institution-name') or [])}")
-        return
-    for group in (get_json(f"{ORCID}/{match.group()}/works").get("group") or [])[:limit]:
-        summary = group["work-summary"][0]
-        ids = {x["external-id-type"]: x["external-id-value"] for x in group.get("external-ids", {}).get("external-id", [])}
-        year = ((summary.get("publication-date") or {}).get("year") or {}).get("value") or "?"
-        print(f"{year} | {summary['title']['title']['value']}")
-        print(f"  {ids.get('doi') or ids.get('arxiv') or 'нет DOI'}")
-
-
-def patents(query, limit):
-    key = os.environ.get("PATENTSVIEW_API_KEY")
-    if not key:
-        raise ValueError("нужен PATENTSVIEW_API_KEY (https://patentsview.org/apis/keyrequest)")
-    params = urllib.parse.urlencode({
-        "q": json.dumps({"_text_any": {"patent_title": query}}),
-        "f": json.dumps(["patent_id", "patent_date", "patent_title", "assignees.assignee_organization"]),
-        "o": json.dumps({"size": limit}),
-    })
-    for item in get_json(f"{PATENTSVIEW}?{params}", {"X-Api-Key": key}).get("patents") or []:
-        orgs = {a.get("assignee_organization") for a in item.get("assignees") or [] if a.get("assignee_organization")}
-        print(f"US{item['patent_id']} | {item.get('patent_date') or '?'} | {item.get('patent_title')}")
-        print(f"  {'; '.join(sorted(orgs)) or 'нет правообладателя'}")
-
-
-def worldbank(indicator, countries, limit):
-    data = get_json(f"{WORLDBANK}/country/{countries}/indicator/{indicator}?{urllib.parse.urlencode({'format': 'json', 'per_page': limit, 'date': '2000:2030'})}")
-    if len(data) < 2:
-        raise ValueError(data[0].get("message", [{}])[0].get("value", "World Bank: нет данных"))
-    for row in data[1] or []:
-        if row.get("value") is not None:
-            print(f"{row['countryiso3code']} | {row['date']} | {row['value']} | {row['indicator']['value']}")
-
-
 def citations(project, raw, limit, question=None):
-    """Forward (citing) and backward (referenced) works of one paper; both logged as searches."""
+    """Direct neighbors. The caller's limit is explicit; no hidden reference cap."""
     work = fetch_work(raw)
     identifier = short_id(work)
+    if not re.fullmatch(r"W\d+", identifier):
+        if work.get("doi"):
+            work = fetch_work(work["doi"])
+            identifier = short_id(work)
+        else:
+            raise ValueError("обход цитирований требует OpenAlex ID или DOI; нативный источник сохранён, но этот обход для него недоступен")
     print(f"# {title(work)} ({identifier})")
-    params = urllib.parse.urlencode({"filter": f"cites:{identifier}", "sort": "cited_by_count:desc", "per_page": limit})
-    citing = [{"id": short_id(w), "doi": w.get("doi"), "title": title(w), "year": w.get("publication_year"), "cites": w.get("cited_by_count") or 0} for w in get_json(f"{OPENALEX}/works?{params}").get("results", [])]
+    citing = openalex_pages({"filter": f"cites:{identifier}", "sort": "cited_by_count:desc"}, limit)
     print("\nЦитируют (по числу цитирований):")
     print_rows(record_search(project, "openalex:cited_by", identifier, citing, question))
-    refs = [r.rsplit("/", 1)[-1] for r in (work.get("referenced_works") or [])]
-    referenced = [{"id": short_id(w), "doi": w.get("doi"), "title": title(w), "year": w.get("publication_year"), "cites": w.get("cited_by_count") or 0} for w in fetch_works(refs[:200])] if refs else []
+    failed = result_status(citing)
+    refs = list(dict.fromkeys(r.rsplit("/", 1)[-1] for r in (work.get("referenced_works") or [])))
+    referenced = [oa_row(w) for w in fetch_works(refs)] if refs else []
     referenced.sort(key=lambda r: -r["cites"])
-    print(f"\nСсылается ({len(refs)} в OpenAlex, показаны {min(limit, len(referenced))} самых цитируемых):")
+    print(f"\nСсылается ({len(refs)} в OpenAlex, получено {len(referenced)}, показаны {min(limit, len(referenced))} самых цитируемых; --limit {limit}):")
     print_rows(record_search(project, "openalex:references", identifier, referenced[:limit], question))
+    if len(referenced) < len(refs):
+        print(f"Неполный результат: API не вернул {len(refs) - len(referenced)} ссылок")
+        failed = 1
+    return failed

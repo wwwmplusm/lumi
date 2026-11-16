@@ -1,1 +1,1 @@
-"""Eurema engine package."""
+"""Lumi engine package."""

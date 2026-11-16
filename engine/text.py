@@ -51,15 +51,3 @@ def normalize(text):
 def snippet(text, limit=300):
     text = " ".join(str(text).split())
     return text if len(text) <= limit else text[: limit - 1] + "…"
-
-
-NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
-
-
-def numbers(text):
-    """Numbers as written, normalized: '2,333' -> '2333'; single digits ignored (too common)."""
-    return {n.replace(",", "").rstrip(".") for n in NUMBER.findall(text) if len(n.replace(",", "")) > 1}
-
-
-def ascii_fold(text):
-    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)).encode("ascii", "ignore").decode()

@@ -4,18 +4,6 @@ Files in each work folder are the source of truth. ``KEYS.tsv`` and
 ``INDEX.md`` are rebuilt from those folders. ``.lumi/index.sqlite`` is a
 rebuildable full-text index.
 
-This module does not import the v1 engine. Copy it (and ``naming.py``) into
-the thesis repo and call it from ``research/library.py``:
-
-- ``add`` around line 142 (``folder = LIBRARY / identifier``) should call
-  ``Library.save_work`` instead of creating ``literature/<OpenAlexID>``.
-- ``index`` (line 127), ``parse`` (line 314) and ``build_index`` (line 364)
-  glob ``W*/`` and miss ``<key>-W…`` folders. Iterate ``Library.work_dirs``.
-- ``load_pages`` (line 337), ``show`` (line 401), ``paper_text`` (line 506)
-  and ``paper_label`` (line 789) join ``LIBRARY / identifier``. Resolve the
-  identifier with ``lumi.naming.resolve_ref`` first. ``show`` also uppercases
-  its argument (line 1129), which breaks a lowercase cite key.
-
 ``notes_mark.md`` and ``notes-*.md`` / ``notes_*.md`` are never written,
 renamed, or deleted. A directory rename that gives a legacy folder its new
 name carries those files along unchanged; that is the only way they move.
@@ -120,9 +108,24 @@ def is_owner_note(name):
     return lower == "notes_mark.md" or lower.startswith("notes-") or lower.startswith("notes_")
 
 
+def extraction_status(pages):
+    """Text-layer coverage, not a claim about OCR accuracy or substantive reading."""
+    if not pages or not any(page.strip() for page in pages):
+        return "none"
+    return "partial" if any(not page.strip() for page in pages) else "yes"
+
+
 def folder_status(path):
+    pages_path = path / "pages.json"
+    if pages_path.is_file():
+        try:
+            status = extraction_status(json.loads(pages_path.read_text(encoding="utf-8")).get("pages"))
+            if status in ("yes", "partial"):
+                return "full text" if status == "yes" else "partial text"
+        except (ValueError, TypeError, AttributeError):
+            pass
     if (path / "paper.txt").is_file():
-        return "full text"
+        return "text unverified"
     if (path / "paper.pdf").is_file():
         return "PDF saved"
     return "metadata only"
@@ -176,6 +179,16 @@ def index_text(works):
 def fts_query(text):
     terms = [token for token in re.findall(r"\w+", text.lower()) if len(token) > 2]
     return " OR ".join(f'"{term}"' for term in dict.fromkeys(terms)) or '""'
+
+
+def page_fingerprint(root):
+    """Detect new/removed/updated page files, also when another tool writes them."""
+    entries = []
+    for meta in sorted(root.glob("*/metadata.json")):
+        path = meta.parent / "pages.json"
+        stat = path.stat() if path.exists() else None
+        entries.append((meta.parent.name, stat.st_mtime_ns if stat else None, stat.st_size if stat else None))
+    return json.dumps(entries)
 
 
 def extract_pdf_text(pdf):
@@ -396,15 +409,14 @@ class Library:
             f"- Authors: {names}",
             f"- Year: {work_year(work) if work_year(work) not in (None, '') else '?'}",
             f"- DOI: {doi}",
-            f"- OpenAlex: {openalex}",
-            f"- PDF source: {'saved as paper.pdf' if (folder / 'paper.pdf').is_file() else 'no open PDF found'}",
-            "- Text extraction: not available",
+            f"- Source ID: {openalex}",
+            "- Current PDF provenance and extraction status: metadata.json; page text: pages.json",
             f"- References indexed: {len(work.get('referenced_works') or [])}",
             f"- Cited by count at retrieval: {work.get('cited_by_count') or 0}",
             "",
             "## Reading notes",
             "",
-            "Not read yet. Record claims with page or section, methods, sample, and limitations.",
+            "Not read yet. Record findings with page or section, methods, sample, and limitations.",
             "",
         ]
         return self.write_text(path, "\n".join(lines))
@@ -423,6 +435,8 @@ class Library:
                     meta = {}
             body = meta.get("work") if isinstance(meta.get("work"), dict) else {}
             folder_oa = openalex_id_from_folder(path.name) or meta.get("openalex_id") or openalex_id_of(body) or ""
+            if work.get("id") and body.get("id") == work["id"]:
+                return path
             if oa and folder_oa and folder_oa == oa:
                 return path
             folder_doi = bare_doi(meta.get("doi") or body.get("doi")).lower()
@@ -456,6 +470,15 @@ class Library:
         hit = resolve_ref([work.folder for work in works], ref, {work.folder: work.key for work in works})
         if hit:
             return self.root / hit
+        from engine.sources import provider_id
+        native = provider_id(ref)
+        if native:
+            matches = [work.path for work in works
+                       if provider_id(((self.read_meta(work.path) or {}).get("work") or {}).get("id", "")) == native]
+            if len(matches) > 1:
+                raise ValueError(f"ambiguous source id {native}")
+            if matches:
+                return matches[0]
         wanted = bare_doi(ref).lower()
         if wanted:
             hits = [work for work in works if bare_doi(work.doi).lower() == wanted]
@@ -468,40 +491,64 @@ class Library:
     # --- parse and index -------------------------------------------------------
 
     def parse(self, refs=None):
-        """Extract ``paper.txt`` and ``pages.json`` from ``paper.pdf``.
-
-        Legacy ``W…`` folders are included so an old folder can still be parsed.
-        ``paper.refetch.pdf`` is not read and not moved. Owner notes are not opened.
-        """
+        """Extract the selected PDF version without touching owner notes."""
+        from engine.papers import selected_pdf, detect_pages
         if refs:
             folders = [self.find(ref) for ref in refs]
         else:
-            folders = [path for path in self.work_dirs() if (path / "paper.pdf").is_file()]
+            folders = [path for path in self.work_dirs() if any((path / name).is_file() for name in ("paper.pdf", "paper.ocr.pdf", "paper.refetch.pdf"))]
         messages = []
+        self.parse_errors = []
         for folder in folders:
-            pdf = folder / "paper.pdf"
-            if not pdf.is_file():
-                messages.append(f"{folder.name}: no paper.pdf")
-                continue
             try:
+                pdf = selected_pdf(folder)
+                if pdf is None:
+                    raise ValueError("no PDF")
                 pages, layout = extract_pdf_text(pdf)
-            except (OSError, RuntimeError) as exc:
-                messages.append(f"{folder.name}: unreadable PDF ({exc})")
+                if not any(page.strip() for page in pages):
+                    raise ValueError("no text layer; OCR required")
+            except (OSError, RuntimeError, ValueError) as exc:
+                message = f"{folder.name}: unreadable PDF ({exc})"
+                messages.append(message)
+                self.parse_errors.append(message)
                 continue
+            partial = extraction_status(pages) == "partial"
+            if partial:
+                blank = [i for i, page in enumerate(pages, 1) if not page.strip()]
+                message = f"{folder.name}: partial text; empty PDF pages {', '.join(map(str, blank))}; inspect PDF / OCR"
+                messages.append(message)
+                self.parse_errors.append(message)
+                # A failed or incomplete re-extraction must not replace existing text.
+                if self.load_pages(folder):
+                    messages.append(f"{folder.name}: existing text preserved")
+                    continue
             record = {"source": f"pdftotext (reading order) of {pdf.name}", "pages": pages}
             layout_pages = layout.split("\f")
             if layout_pages and not layout_pages[-1].strip():
                 layout_pages.pop()
             if len(layout_pages) == len(pages):
                 record["pages_layout"] = layout_pages
+            meta = self.read_meta(folder) or {}
+            if meta.get("page_source") != "manual":
+                detect_pages(meta, pdf, layout_pages if len(layout_pages) == len(pages) else pages)
+            elif len(meta.get("page_labels") or []) != len(pages):
+                message = f"{folder.name}: page count changed; verify manual page labels before parsing"
+                messages.append(message)
+                self.parse_errors.append(message)
+                continue
             self.write_text(folder / "pages.json", json.dumps(record, ensure_ascii=False) + "\n")
             self.write_text(folder / "paper.txt", layout if layout.endswith("\n") else layout + ("\n" if layout else ""))
+            meta.update(text_source_pdf=pdf.name, text_extraction="partial" if partial else "ok",
+                        fulltext="partial" if partial else "yes",
+                        empty_pdf_pages=[i for i, page in enumerate(pages, 1) if not page.strip()])
+            self.write_text(folder / "metadata.json", json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
             messages.append(f"{folder.name}: {len(pages)} pages")
         if messages:
             self.write_catalog()
         return messages
 
     def rebuild_index(self):
+        signature = page_fingerprint(self.root)
         database = self.root / ".lumi" / "index.sqlite"
         if database.exists():
             database.unlink()
@@ -514,24 +561,48 @@ class Library:
             for number, text in enumerate(pages, 1):
                 connection.execute("INSERT INTO pages VALUES (?, ?, ?)", (work.folder, number, text))
                 count += 1
+        connection.execute("INSERT OR REPLACE INTO lumi_state VALUES ('pages', ?)", (signature,))
         connection.commit()
         connection.close()
         return count
 
     def lookup(self, query, limit=10, papers=None, raw=False):
-        database = self.root / ".lumi" / "index.sqlite"
-        if not database.is_file():
+        connection = self._connect()
+        previous = connection.execute("SELECT value FROM lumi_state WHERE key='pages'").fetchone()
+        connection.close()
+        if not previous or previous[0] != page_fingerprint(self.root):
             self.rebuild_index()
         identifiers = None
         if papers:
             identifiers = [self.find(ref).name for ref in papers]
         connection = self._connect()
-        sql = "SELECT paper, page, snippet(pages, 2, '[', ']', '…', 40) FROM pages WHERE pages MATCH ?"
-        args = [query if raw else fts_query(query)]
+        # unicode61 treats a continuous Han sentence as one token. Search Han
+        # terms as literal substrings; keep FTS stemming/ranking for other terms.
+        han = [] if raw else re.findall(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af]+", query)
+        latin = query if raw else re.sub(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U000323af]+", " ", query)
+        fts = latin if raw else fts_query(latin)
+        filters, filter_args = "", []
         if identifiers:
-            sql += f" AND paper IN ({','.join('?' * len(identifiers))})"
-            args.extend(identifiers)
-        rows = connection.execute(sql + " ORDER BY bm25(pages) LIMIT ?", (*args, limit)).fetchall()
+            filters = f" AND paper IN ({','.join('?' * len(identifiers))})"
+            filter_args = identifiers
+        # UNION keeps one row per page even if both scripts match. Rank FTS hits
+        # first, then deterministic literal matches. Raw mode remains pure FTS5.
+        sql = ("SELECT paper, page, snippet(pages, 2, '[', ']', '…', 40), bm25(pages) AS rank "
+               "FROM pages WHERE pages MATCH ?" + filters)
+        args = [fts, *filter_args]
+        if han:
+            conditions = " OR ".join("instr(text, ?) > 0" for _ in han)
+            sql += " UNION ALL SELECT paper, page, text, 1.0 FROM pages WHERE (" + conditions + ")" + filters
+            sql += " AND rowid NOT IN (SELECT rowid FROM pages WHERE pages MATCH ?)"
+            args += [*han, *filter_args, fts]
+        rows = []
+        for paper, page, text, rank in connection.execute(sql + " ORDER BY rank, paper, page LIMIT ?", (*args, limit)).fetchall():
+            if rank == 1.0 and han:
+                position, term = min((text.index(term), term) for term in han if term in text)
+                start = max(0, position - 60)
+                excerpt = text[start:position] + "[" + term + "]" + text[position + len(term):position + len(term) + 160]
+                text = ("…" if start else "") + excerpt + ("…" if position + len(term) + 160 < len(text) else "")
+            rows.append((paper, page, text))
         connection.close()
         return rows
 
@@ -542,6 +613,7 @@ class Library:
         connection.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS pages USING fts5(paper UNINDEXED, page UNINDEXED, text, tokenize='porter unicode61')"
         )
+        connection.execute("CREATE TABLE IF NOT EXISTS lumi_state (key TEXT PRIMARY KEY, value TEXT)")
         return connection
 
     # --- check -----------------------------------------------------------------
@@ -613,10 +685,6 @@ class Library:
                 findings.append(Finding("warning", "missing", f"{path.name}/paper.txt", "paper.pdf has not been extracted"))
             if not (path / "pages.json").is_file():
                 findings.append(Finding("warning", "missing", f"{path.name}/pages.json", "no page index"))
-        if not (path / "notes_mark.md").is_file():
-            findings.append(Finding("info", "missing-optional", f"{path.name}/notes_mark.md", "owner notes are not created by the library"))
-        if not (path / "ai_review.md").is_file():
-            findings.append(Finding("info", "missing-optional", f"{path.name}/ai_review.md", "AI review is written only from verified text"))
         for child in sorted(path.iterdir(), key=lambda item: item.name):
             if child.name.startswith("."):
                 continue
@@ -708,19 +776,27 @@ class Library:
         findings = []
         if not project_root.is_dir():
             return findings
-        for path in project_root.rglob("*.md"):
-            if not path.is_file() or path.is_symlink():
-                continue
-            if any(part in SKIP_SCAN for part in path.parts):
-                continue
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeDecodeError):
-                continue
-            for number, line in enumerate(text.splitlines(), 1):
-                if STALE_REF.search(line):
-                    relative = path.relative_to(project_root)
-                    findings.append(Finding("warning", "stale-ref", f"{relative}:{number}", "old literature/W…/ path"))
+        protected = (self.root.parent / "research" / "knowledge").resolve()
+        if project_root.resolve().is_relative_to(protected):
+            return findings
+        for directory, dirs, files in os.walk(project_root, followlinks=False):
+            base = Path(directory)
+            dirs[:] = [name for name in dirs if name not in SKIP_SCAN
+                       and not (base / name).is_symlink()
+                       and not (base / name).resolve().is_relative_to(protected)
+                       and not (base.name == "research" and name == "knowledge")]
+            for name in files:
+                path = base / name
+                if path.suffix != ".md" or path.is_symlink():
+                    continue
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except (OSError, UnicodeDecodeError):
+                    continue
+                for number, line in enumerate(text.splitlines(), 1):
+                    if STALE_REF.search(line):
+                        relative = path.relative_to(project_root)
+                        findings.append(Finding("warning", "stale-ref", f"{relative}:{number}", "old literature/W…/ path"))
         return findings
 
     # --- normalize -------------------------------------------------------------

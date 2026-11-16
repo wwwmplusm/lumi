@@ -27,13 +27,14 @@ def work(wid, surname, year, title, doi=None, first=None, last=None):
 @pytest.fixture
 def project(tmp_path):
     root = tmp_path / "proj"
-    (root / "sources" / "papers").mkdir(parents=True)
-    (root / "eurema.json").write_text(json.dumps({"name": "Test", "context": "export controls"}))
-    (root / "questions.md").write_text("- H1: Starvation | keywords: GPU access, export controls\n- H2: Efficiency | keywords: quantization\n")
+    (root / "literature").mkdir(parents=True)
+    (root / "lumi.json").write_text(json.dumps({"name": "Test", "context": "export controls"}))
+    (root / "research").mkdir()
+    (root / "research" / "questions.md").write_text("- H1: Starvation | keywords: GPU access, export controls\n- H2: Efficiency | keywords: quantization\n")
     metas = {"W1": work("W1", "Gao", 2024, "Export controls and Chinese AI labs: evidence", "https://doi.org/10.1/x", 101, 103),
              "W2": work("W2", "Gao", 2024, "Collaboration under sanctions", None)}
     for wid, pages in PAGES.items():
-        folder = root / "sources" / "papers" / wid
+        folder = root / "literature" / wid
         folder.mkdir()
         (folder / "pages.json").write_text(json.dumps({"pages": pages, "pages_layout": pages}))
         key = "Gao2024" if wid == "W1" else "Gao2024b"
@@ -44,12 +45,3 @@ def project(tmp_path):
             meta.update(page_labels=None, page_source="none")
         (folder / "metadata.json").write_text(json.dumps(meta))
     return Project(root)
-
-
-def fake_worker(responses):
-    calls = []
-
-    def run(project, step, task, stdin_text, tag):
-        calls.append((step, tag, stdin_text))
-        return responses.pop(0), {"cost_usd": 0.01, "input_tokens": 100, "output_tokens": 10}
-    return run, calls

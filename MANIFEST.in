@@ -1,0 +1,4 @@
+include install.sh
+include tests/conftest.py
+recursive-include tests/fixtures *
+include docs/installation.md docs/development.md

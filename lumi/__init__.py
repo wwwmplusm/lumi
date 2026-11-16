@@ -1,8 +1,3 @@
-"""Lumi library layer: folder names, KEYS.tsv, and INDEX.md.
+"""Lumi research library and command-line interface."""
 
-Self-contained (stdlib only) so it can be copied next to a project's
-``research/library.py``. Cite-key rules and the proposed fallback and
-collision policy live in ``lumi.naming``.
-"""
-
-__version__ = "0"
+__version__ = "0.2.0"

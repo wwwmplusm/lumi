@@ -1,70 +1,25 @@
-"""FTS5 full-text index over parsed pages and claims (rebuilt from files, never edited by hand)."""
+"""Human-readable search and page display over the library's single index."""
 
-import re
-import sqlite3
-
+from lumi.library import Library
 from . import papers
 from .text import snippet
 
 
-def connect(project):
-    project.cache.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(project.index_db)
-    db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS pages USING fts5(paper UNINDEXED, page UNINDEXED, text, tokenize='porter unicode61')")
-    db.execute("CREATE VIRTUAL TABLE IF NOT EXISTS claims USING fts5(id UNINDEXED, paper UNINDEXED, statement, tokenize='porter unicode61')")
-    return db
-
-
 def build(project, quiet=False):
-    db = connect(project)
-    db.execute("DELETE FROM pages")
-    count = 0
-    for identifier in project.paper_ids():
-        for number, text in enumerate(papers.load_pages(project, identifier) or [], 1):
-            db.execute("INSERT INTO pages VALUES (?, ?, ?)", (identifier, number, text))
-            count += 1
-    db.execute("DELETE FROM claims")
-    for claim in project.claims():
-        paper = (claim.get("evidence") or [{}])[0].get("paper")
-        db.execute("INSERT INTO claims VALUES (?, ?, ?)", (claim["id"], paper, claim["statement"]))
-    db.commit()
-    db.close()
+    count = Library(project.papers).rebuild_index()
     if not quiet:
         print(f"индекс: {count} стр.")
-
-
-def fts_query(text, mode="OR"):
-    """Free text -> quoted-term query (FTS5 syntax-safe)."""
-    terms = [t for t in re.findall(r"\w+", text.lower()) if len(t) > 2]
-    return f" {mode} ".join(f'"{t}"' for t in dict.fromkeys(terms)) or '""'
-
-
-def ensure(project):
-    """Build the index on first use (it lives in .cache/, outside git)."""
-    db = connect(project)
-    empty = db.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
-    db.close()
-    if empty and any((project.papers / i / "pages.json").exists() for i in project.paper_ids()):
-        build(project, quiet=True)
+    return count
 
 
 def search_pages(project, query, limit=10, paper_ids=None):
-    ensure(project)
-    db = connect(project)
-    sql = "SELECT paper, page, snippet(pages, 2, '[', ']', '…', 40) FROM pages WHERE pages MATCH ?"
-    args = [query]
-    if paper_ids:
-        sql += f" AND paper IN ({','.join('?' * len(paper_ids))})"
-        args += paper_ids
-    rows = db.execute(sql + " ORDER BY bm25(pages) LIMIT ?", (*args, limit)).fetchall()
-    db.close()
-    return rows
+    return Library(project.papers).lookup(query, limit, paper_ids, raw=True)
 
 
 def lookup(project, text, limit=10, refs=None, raw=False):
     """Print matching pages as `[Gao 2026, с. 112] «…»`; returns rows (paper, pdf page, snippet)."""
     ids = [papers.resolve(project, r) for r in refs] if refs else None
-    rows = search_pages(project, text if raw else fts_query(text), limit, ids)
+    rows = Library(project.papers).lookup(text, limit, ids, raw=raw)
     metas = {}
     for paper, page, text_ in rows:
         meta = metas.setdefault(paper, papers.load_meta(project, paper))

@@ -1,3 +1,5 @@
+> Архив. Сохранено для истории; текущие границы продукта — в [product.md](../product.md). Команды и пути ниже могут быть устаревшими.
+
 # Research questions (DRAFT by agent, 2026-10-09 — copied from project_card_2026-10-08.md; user owns this file)
 
 Format: `- ID: question | keywords: comma-separated search terms`. `library.py gaps` reads it.

@@ -100,6 +100,8 @@ def build_real_library(tmp_path):
                     },
                 }
                 path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            elif name == "pages.json":
+                path.write_text(json.dumps({"pages": ["Fixture text."]}), encoding="utf-8")
             elif name == "notes_mark.md":
                 path.write_text("OWNER NOTES SENTINEL\n", encoding="utf-8")
             elif name.startswith("notes-"):
@@ -108,6 +110,14 @@ def build_real_library(tmp_path):
                 path.write_text(f"# {title}\n", encoding="utf-8")
             else:
                 path.write_bytes(b"x\n")
+    # Historical INDEX used the presence of paper.txt as proof of full text.
+    # Keep the real catalog fixture, but mark unindexed text honestly in this project.
+    lines = index.splitlines()
+    for i, line in enumerate(lines):
+        for row in index_rows:
+            if f"({row['folder']}/README.md)" in line and not (library / row['folder'] / 'pages.json').exists():
+                lines[i] = line.replace('| full text |', '| text unverified |')
+    (library / "INDEX.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return Library(library)
 
 
@@ -220,7 +230,7 @@ def test_check_reports_real_tree_and_writes_nothing(tmp_path):
     assert any(item.code == "metadata-only" and item.path.startswith("mahoney2012") for item in findings)
     assert any(item.code == "missing" and item.path == "collier2011understanding-W2159961463/pages.json" for item in findings)
     notes = [item for item in findings if item.path.endswith("/notes_mark.md")]
-    assert notes and all(item.level == "info" for item in notes)
+    assert not notes
     assert not any(item.path.startswith("pu2026sanctions") and item.path.endswith("notes_mark.md") for item in notes)
     assert (library.root / "pu2026sanctions-W7203724392" / "notes_mark.md").read_text(encoding="utf-8") == "OWNER NOTES SENTINEL\n"
     assert library.plan() == []
@@ -290,7 +300,7 @@ def test_fallback_order_is_easy_to_change(tmp_path, monkeypatch):
     local = library.save_work(_work(None, "Bea Sample", 2023, "Widgets after the rain"), pdf_bytes=pdf)
     assert local == f"sample2023widgets-local_{digest[:8]}"
     assert library.save_work(_work(None, "Bea Sample", 2023, "Widgets after the rain"), pdf_bytes=pdf) == local
-    assert FALLBACK_SUFFIXES == ("doi", "arxiv", "local")
+    assert FALLBACK_SUFFIXES == ("doi", "arxiv", "provider", "local")
     monkeypatch.setattr("lumi.naming.FALLBACK_SUFFIXES", ("arxiv", "doi", "local"))
     both = _work(None, "Cara Other", 2024, "Widgets after the rain", doi="https://doi.org/10.1000/zzz", ids={"arxiv": "1991.00001"})
     assert library.save_work(both) == "other2024widgets-arxiv_1991.00001"
@@ -391,13 +401,13 @@ def test_mismatch_is_reported_and_not_repaired_by_check(tmp_path):
 
 def test_engine_lookup_accepts_new_folder_names(tmp_path, monkeypatch):
     root = tmp_path / "proj"
-    folder = root / "sources" / "papers" / "example2020capital-W50"
+    folder = root / "literature" / "example2020capital-W50"
     folder.mkdir(parents=True)
-    (root / "eurema.json").write_text(json.dumps({"name": "T", "context": "c"}))
+    (root / "lumi.json").write_text(json.dumps({"name": "T", "context": "c"}))
     meta = {"key": "example2020capital", "work": _work("W50", "Ada Example", 2020, "Capital markets after the shock", doi="https://doi.org/10.1000/z")}
     (folder / "metadata.json").write_text(json.dumps(meta), encoding="utf-8")
     (folder / "pages.json").write_text(json.dumps({"pages": ["zyzzyva export control"]}), encoding="utf-8")
-    legacy = root / "sources" / "papers" / "W2"
+    legacy = root / "literature" / "W2"
     legacy.mkdir()
     (legacy / "metadata.json").write_text(json.dumps({"key": "Gao2024b", "work": _work("W2", "Ann Gao", 2024, "Collaboration under sanctions")}), encoding="utf-8")
     project = Project(root)

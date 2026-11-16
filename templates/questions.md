@@ -1,6 +1,4 @@
-# Вопросы и гипотезы
+# Research questions
 
-Пишет пользователь. Формат строки: `- ID: вопрос | keywords: термины, через, запятую` — код читает ID для MAP.md и поиска.
-
-- RQ: Главный вопрос исследования | keywords: …
-- H1: Первая гипотеза | keywords: …
+Optional search tags: `- ID: question | keywords: comma-separated terms`.
+The agent can draft questions from the project context for the user to refine.

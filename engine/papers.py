@@ -1,6 +1,5 @@
 """Papers: metadata, human labels (key, cite, label), printed page numbers, add and parse."""
 
-import datetime as dt
 import json
 import re
 import shutil
@@ -9,7 +8,6 @@ from collections import Counter
 
 from . import sources
 from .project import today
-from .text import ascii_fold
 
 ARTICLE_STARTS = 3  # pages without a number allowed before the article starts (cover, front matter)
 
@@ -22,13 +20,22 @@ def meta_path(project, identifier):
 
 def load_meta(project, identifier):
     path = meta_path(project, identifier)
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if not path.exists():
+        return None
+    meta = json.loads(path.read_text(encoding="utf-8"))
+    from lumi.naming import parse_folder_name
+    parsed = parse_folder_name(identifier)
+    if parsed:
+        meta.setdefault("key", parsed.key)
+    meta["fulltext"] = fulltext_status(project, identifier, meta)
+    meta.setdefault("page_source", "none")
+    return meta
 
 
 def save_meta(project, identifier, meta):
     path = meta_path(project, identifier)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    from lumi.library import Library
+    Library(project.papers).write_text(path, json.dumps(meta, ensure_ascii=False, indent=2) + "\n")
 
 
 def all_meta(project):
@@ -36,6 +43,8 @@ def all_meta(project):
 
 
 def abstract(work):
+    if work.get("abstract_text"):
+        return work["abstract_text"]
     index = work.get("abstract_inverted_index") or {}
     words = sorted((pos, word) for word, places in index.items() for pos in places)
     return " ".join(w for _, w in words)
@@ -59,18 +68,6 @@ def surnames(work):
         if name:
             out.append(name.split()[-1])
     return out or ["Anon"]
-
-
-def make_key(work, taken):
-    base = re.sub(r"[^A-Za-z]", "", ascii_fold(surnames(work)[0])) or "Anon"
-    base = base[0].upper() + base[1:]
-    stem = f"{base}{work.get('publication_year') or 'nd'}"
-    if stem not in taken:
-        return stem
-    for letter in "bcdefghijklmnopqrstuvwxyz":
-        if stem + letter not in taken:
-            return stem + letter
-    raise ValueError(f"слишком много ключей {stem}")
 
 
 def year_part(meta):
@@ -115,6 +112,19 @@ def resolve(project, ref):
     names = project.paper_ids()
     keys = {identifier: (meta.get("key") or "") for identifier, meta in all_meta(project).items()}
     found = resolve_ref(names, ref, keys)
+    if not found:
+        from lumi.library import Library
+        try:
+            found = Library(project.papers).find(ref).name
+        except LookupError:
+            pass
+    if not found:
+        normalized = re.sub(r"\s+", "", ref).casefold()
+        matches = [name for name, meta in all_meta(project).items()
+                   if re.sub(r"\s+", "", cite_name(meta)).casefold() == normalized]
+        if len(matches) > 1:
+            raise ValueError(f"неоднозначная ссылка «{ref}»: {', '.join(matches)}; используйте ключ или DOI")
+        found = matches[0] if matches else None
     if not found:
         raise ValueError(f"нет статьи «{ref}» в библиотеке")
     return found
@@ -239,21 +249,22 @@ def set_pages_manual(project, identifier, first_printed, at_pdf_page=1):
 
 def pdf_file(project, identifier):
     folder = project.papers / identifier
-    for name in ("paper.refetch.pdf", "paper.pdf"):  # refetch replaces a truncated original
+    return selected_pdf(folder)
+
+
+def selected_pdf(folder):
+    """Respect the recorded text version, including already OCRed originals."""
+    path = folder / "metadata.json"
+    meta = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    selected = meta.get("text_source_pdf")
+    if selected:
+        if selected not in ("paper.pdf", "paper.ocr.pdf", "paper.refetch.pdf") or not (folder / selected).is_file():
+            raise ValueError(f"{folder.name}: выбранный text_source_pdf отсутствует или не поддерживается: {selected}")
+        return folder / selected
+    for name in ("paper.ocr.pdf", "paper.refetch.pdf", "paper.pdf"):
         if (folder / name).exists():
             return folder / name
     return None
-
-
-def pdf_pages(pdf, layout=False):
-    """Per-page text via pdftotext; pages split on form feeds."""
-    result = subprocess.run(["pdftotext", *(["-layout"] if layout else []), str(pdf), "-"], capture_output=True, text=True)
-    if result.returncode != 0:
-        raise ValueError(result.stderr.strip().splitlines()[-1] if result.stderr.strip() else "pdftotext не смог прочитать")
-    pages = result.stdout.split("\f")
-    if pages and not pages[-1].strip():
-        pages.pop()
-    return pages
 
 
 def pdf_ok(path):
@@ -274,34 +285,11 @@ def load_pages(project, identifier, layout=False):
 
 
 def fulltext_status(project, identifier, meta):
-    if load_pages(project, identifier):
-        return "yes"
+    from lumi.library import extraction_status
+    status = extraction_status(load_pages(project, identifier))
+    if status != "none":
+        return status
     return "abstract_only" if abstract(meta["work"]) else "none"
-
-
-def parse_one(project, identifier):
-    meta = load_meta(project, identifier)
-    pdf = pdf_file(project, identifier)
-    message = None
-    if pdf:
-        try:
-            pages = pdf_pages(pdf)
-            if sum(len(x) for x in pages) < 1000:
-                message = f"нет текстового слоя ({len(pages)} стр.)"
-            else:
-                layout = pdf_pages(pdf, layout=True)
-                record = {"source": f"pdftotext (reading order) of {pdf.name}", "pages": pages}
-                if len(layout) == len(pages):
-                    record["pages_layout"] = layout
-                (project.papers / identifier / "pages.json").write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-                detect_pages(meta, pdf, layout if len(layout) == len(pages) else pages)
-                message = f"{len(pages)} стр., печатные страницы: {meta['page_source']}" + (f" ({meta['page_note']})" if meta.get("page_note") else "")
-        except ValueError as exc:
-            message = f"PDF не читается ({exc})"
-            meta["text_extraction"] = f"failed: {exc}"
-    meta["fulltext"] = fulltext_status(project, identifier, meta)
-    save_meta(project, identifier, meta)
-    return message or "нет PDF"
 
 
 # --- add ----------------------------------------------------------------------------------
@@ -329,10 +317,7 @@ def unpaywall_pdfs(doi, seen):
     doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi, flags=re.I)
     if not email or not doi:
         return
-    try:
-        data = sources.get_json(f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi, safe='/')}?" + urllib.parse.urlencode({"email": email}))
-    except sources.NET_ERRORS:
-        return
+    data = sources.get_json(f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi, safe='/')}?" + urllib.parse.urlencode({"email": email}))
     for location in data.get("oa_locations") or []:
         url = location.get("url_for_pdf")
         if url and url not in seen:
@@ -354,39 +339,65 @@ def download_pdf(url, destination):
 
 
 def add(project, raw, question=None):
-    from . import cards, index
-    work = sources.fetch_work(raw)
-    identifier = sources.short_id(work)
+    """Use the existing catalog and preserve hand-edited cards and text versions."""
+    from lumi.library import Library
+    from . import index
+    library = Library(project.papers)
+    try:
+        identifier = resolve(project, raw)
+    except ValueError:
+        candidate = next((row for row in project.candidates()
+                          if row["id"] == raw or (row.get("doi") or "").lower() == raw.lower()
+                          or (sources.provider_id(raw) and sources.provider_id(row["id"]) == sources.provider_id(raw))), None)
+        # Search already returned bibliographic metadata and provider provenance.
+        # Do not require the same work to also exist in OpenAlex.
+        work = candidate.get("work") if candidate else None
+        if not work:
+            work = sources.fetch_work(raw)
+        identifier = library.save_work(work)
     folder = project.papers / identifier
-    folder.mkdir(parents=True, exist_ok=True)
-    meta = load_meta(project, identifier) or {}
-    taken = {m.get("key") for i, m in all_meta(project).items() if i != identifier}
-    meta.update(retrieved_at=dt.datetime.now(dt.timezone.utc).isoformat(), work=work)
-    meta.setdefault("key", make_key(work, taken))
-    meta.setdefault("questions", [])
-    if question and question not in meta["questions"]:
-        meta["questions"].append(question)
-    errors = []
-    if not pdf_file(project, identifier):
-        for url in pdf_candidates(work):
-            try:
-                download_pdf(url, folder / "paper.pdf")
-                meta["pdf_source"] = url
-                break
-            except sources.NET_ERRORS as exc:
-                errors.append(f"{url}: {exc}")
-    meta["pdf_errors"] = errors
-    meta.setdefault("page_source", "none")
-    save_meta(project, identifier, meta)
-    parsed = parse_one(project, identifier)
     meta = load_meta(project, identifier)
-    cards.write_stub(project, identifier)
+    work = meta["work"]
+    if question:
+        meta.setdefault("questions", [])
+        if question not in meta["questions"]:
+            meta["questions"].append(question)
+    if not pdf_file(project, identifier):
+        errors = []
+        try:
+            for url in pdf_candidates(work):
+                try:
+                    download_pdf(url, folder / "paper.pdf")
+                    meta["pdf_source"] = url
+                    break
+                except sources.NET_ERRORS as exc:
+                    errors.append(f"{url}: {exc}")
+        except sources.NET_ERRORS as exc:
+            errors.append(f"поиск открытой копии: {exc}")
+        from .onboarding import redact
+        meta.setdefault("pdf_errors", []).extend(redact(error) for error in errors)
+        if not (folder / "paper.pdf").exists():
+            meta["download_status"] = "failed" if errors else "no_open_copy"
+        else:
+            meta["download_status"] = "saved"
+    save_meta(project, identifier, meta)
+    # Re-adding a paper must not replace verified/OCR text already in use.
+    if not load_pages(project, identifier):
+        parsed = "; ".join(library.parse([identifier]))
+    else:
+        parsed = "сохранён существующий текст"
     mark_candidate(project, identifier, work, "include")
+    library.write_catalog()
     index.build(project)
-    print(f"{label(meta)} · {meta['key']} · {identifier}")
+    meta = load_meta(project, identifier)
+    print(f"{label(meta)} · {meta.get('key')} · {identifier}")
     print(f"  текст: {meta['fulltext']} · {parsed}")
-    if meta["fulltext"] != "yes":
-        print("  полного текста нет — статью нельзя считать прочитанной")
+    if meta["fulltext"] not in ("yes", "partial"):
+        from .onboarding import redact
+        for error in meta.get("pdf_errors") or []:
+            print(f"  загрузка: {redact(error)}")
+        if meta.get("download_status") == "no_open_copy":
+            print("  загрузка: открытая копия не найдена; сохранены метаданные")
     return identifier
 
 
@@ -394,14 +405,17 @@ def mark_candidate(project, identifier, work, decision, why=""):
     doi = (work.get("doi") or "").lower().replace("https://doi.org/", "")
     rows = project.candidates()
     for row in rows:
-        if row["id"] == identifier or (doi and (row.get("doi") or "").lower() == doi):
+        native = sources.provider_id(work.get("id", ""))
+        if (row["id"] in (identifier, sources.short_id(work))
+                or (native and sources.provider_id(row["id"]) == native)
+                or (doi and (row.get("doi") or "").lower().replace("https://doi.org/", "") == doi)):
             row.update(decision=decision, decided=today(), why=why or row.get("why", ""), library_id=identifier)
     project.save_candidates(rows)
 
 
 def parse(project, ids=None):
-    from . import index
-    ids = ids or [i for i in project.paper_ids() if pdf_file(project, i)]
-    for identifier in ids:
-        print(f"{identifier}: {parse_one(project, identifier)}")
-    index.build(project)
+    from lumi.library import Library
+    library = Library(project.papers)
+    for message in library.parse(ids):
+        print(message)
+    return 1 if library.parse_errors else 0
